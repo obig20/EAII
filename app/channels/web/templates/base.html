@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Daily Close — Birana Technology{% endblock %}</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- HTMX CDN -->
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    .htmx-indicator { display: none; }
+    .htmx-request .htmx-indicator { display: inline-block; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col font-sans">
+  <!-- Top Navigation Header -->
+  <header class="bg-slate-900 text-white shadow-md">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <span class="text-2xl font-black tracking-tight text-amber-400">DAILY CLOSE</span>
+        <span class="text-xs font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 uppercase tracking-wider">Ethiopia (ETB)</span>
+        <span class="text-xs text-slate-400">| ዕለታዊ ሂሳብ ማጠቃለያ</span>
+      </div>
+      <div class="flex items-center space-x-4 text-sm">
+        <span class="text-slate-300">Tenant: <strong class="text-white">{{ tenant_name or 'Addis Wholesalers' }}</strong></span>
+        <span class="px-2.5 py-1 rounded-full text-xs font-medium {% if user_role == 'owner' %}bg-amber-500/20 text-amber-300 border border-amber-500/30{% else %}bg-blue-500/20 text-blue-300 border border-blue-500/30{% endif %}">
+          Role: {{ user_role|capitalize }}
+        </span>
+        <a href="/brief" target="_blank" class="text-xs bg-slate-800 hover:bg-slate-700 text-amber-300 px-3 py-1.5 rounded transition">Morning Brief</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500">
+    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-2">
+      <div>Daily Close &copy; 2026 Birana Technology, Addis Ababa. All data residency strictly Ethiopian.</div>
+      <div class="flex space-x-4">
+        <a href="/exports/sales.csv" class="hover:text-slate-800 underline">Export Sales (CSV)</a>
+        <a href="/exports/payments.csv" class="hover:text-slate-800 underline">Export Payments (CSV)</a>
+        <a href="/exports/accountant.csv" class="hover:text-slate-800 font-semibold text-indigo-600 underline">Accountant Export</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

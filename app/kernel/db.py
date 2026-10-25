@@ -44,10 +44,10 @@ _engine = create_engine(
 _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False)
 
 
-@contextmanager
 def get_session() -> Generator[Session, None, None]:
     """
-    Yield a database session.  Commits on clean exit, rolls back on exception.
+    FastAPI dependency yielding a database session.
+    Commits on clean exit, rolls back on exception, closes in finally.
 
     Callers MUST call `set_tenant(session, tenant_id)` before any query.
     """
@@ -60,6 +60,9 @@ def get_session() -> Generator[Session, None, None]:
         raise
     finally:
         session.close()
+
+
+session_scope = contextmanager(get_session)
 
 
 def get_engine():

@@ -1,0 +1,79 @@
+<div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+  <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+    <div>
+      <h3 class="font-bold text-slate-900 text-lg">Daily Close Step 3: Proposed Matches (Review Queue)</h3>
+      <p class="text-xs text-slate-500">Requires owner or cashier review. Partial, combined, ambiguous, or L4 items.</p>
+    </div>
+    <span class="px-3 py-1 bg-amber-100 text-amber-800 font-bold rounded-full text-xs">
+      {{ proposed_items|length }} Pending Items
+    </span>
+  </div>
+
+  <div class="divide-y divide-slate-100">
+    {% for item in proposed_items %}
+    <div class="p-6 hover:bg-slate-50/50 transition flex flex-col md:flex-row justify-between items-start md:items-center gap-4" id="match-card-{{ item.match_id or item.payment_id }}">
+      <div class="space-y-1.5 flex-1">
+        <div class="flex items-center space-x-2">
+          <span class="px-2 py-0.5 rounded text-xs font-bold {% if item.evidence_level == 'L4' %}bg-purple-100 text-purple-800 border border-purple-200{% else %}bg-blue-100 text-blue-800 border border-blue-200{% endif %}">
+            Evidence: {{ item.evidence_level }}
+          </span>
+          <span class="font-black text-slate-900 text-lg">{{ item.amount_etb }}</span>
+          <span class="text-xs text-slate-400">· Value Date: {{ item.value_date }}</span>
+          {% if item.is_ambiguous %}
+          <span class="px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-700">Ambiguous Collision</span>
+          {% endif %}
+        </div>
+
+        <div class="text-sm font-medium text-slate-700">
+          Counterparty: <strong class="text-slate-900">{{ item.counterparty_name or 'Unknown' }}</strong>
+          {% if item.counterparty_account %} · Account: <code>{{ item.counterparty_account }}</code>{% endif %}
+        </div>
+
+        <div class="text-xs text-slate-500 italic">
+          Raw Reference: "{{ item.raw_reference or 'None' }}"
+        </div>
+
+        <div class="text-xs bg-amber-50 text-amber-900 border border-amber-200 rounded px-3 py-1.5 font-medium inline-block">
+          Proposed for: <strong>{{ item.target_invoice_numbers }}</strong> · Reason: {{ item.reason }}
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="flex items-center space-x-2 shrink-0">
+        {% if item.evidence_level in ['L1', 'L2', 'L3'] %}
+        <button
+          hx-post="/matches/{{ item.match_id }}/approve"
+          hx-target="#match-card-{{ item.match_id }}"
+          hx-swap="outerHTML"
+          class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3.5 py-2 rounded-lg shadow-sm transition">
+          Confirm Match
+        </button>
+        {% elif user_role == 'owner' and item.evidence_level == 'L4' %}
+        <button
+          hx-post="/matches/{{ item.match_id or item.payment_id }}/mark-unverified"
+          hx-target="#match-card-{{ item.match_id or item.payment_id }}"
+          hx-swap="outerHTML"
+          class="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-3 py-2 rounded-lg shadow-sm transition"
+          title="Owner override: Marks as accepted unverified. Never counted as paid in totals.">
+          Accept Unverified (L4)
+        </button>
+        {% endif %}
+
+        <button
+          hx-post="/matches/{{ item.match_id or item.payment_id }}/reject"
+          hx-target="#match-card-{{ item.match_id or item.payment_id }}"
+          hx-swap="outerHTML"
+          class="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-semibold px-3 py-2 rounded-lg transition">
+          Reject
+        </button>
+      </div>
+    </div>
+    {% else %}
+    <div class="p-8 text-center text-slate-400">
+      <div class="text-2xl mb-1">🎉</div>
+      <div class="font-medium text-slate-600">Review queue is completely clear!</div>
+      <div class="text-xs text-slate-400">All statement lines and credit payments have been verified.</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>

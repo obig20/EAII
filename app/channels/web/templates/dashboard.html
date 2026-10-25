@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="space-y-6">
+
+  <!-- Alert Banner if gaps or messages -->
+  {% if message %}
+  <div class="p-4 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-sm flex items-center justify-between">
+    <div>{{ message }}</div>
+  </div>
+  {% endif %}
+
+  <!-- KPI Cards Row -->
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+      <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Total Receivables</span>
+      <div class="text-2xl font-black text-slate-900 mt-1">{{ aging_report.grand_total_outstanding_etb }}</div>
+      <div class="text-xs text-slate-400 mt-1">{{ aging_report.retailers|length }} active debtor accounts</div>
+    </div>
+
+    <div class="bg-white p-5 rounded-xl border border-red-200 bg-red-50/20 shadow-sm">
+      <span class="text-xs font-bold uppercase tracking-wider text-red-600">Total Overdue</span>
+      <div class="text-2xl font-black text-red-600 mt-1">{{ aging_report.grand_total_overdue_etb }}</div>
+      <div class="text-xs text-red-500 mt-1">Requires morning collection action</div>
+    </div>
+
+    <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+      <span class="text-xs font-bold uppercase tracking-wider text-amber-600">Review Queue</span>
+      <div class="text-2xl font-black text-amber-600 mt-1">{{ proposed_items|length }}</div>
+      <div class="text-xs text-slate-400 mt-1">Proposed & unverified matches</div>
+    </div>
+
+    <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+      <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Addis Ababa Time</span>
+      <div class="text-xl font-bold text-slate-800 mt-1">{{ today_date.strftime('%A, %d %b') }}</div>
+      <div class="text-xs text-emerald-600 font-medium mt-1">● System Online (EAT UTC+3)</div>
+    </div>
+  </div>
+
+  <!-- DAILY CLOSE 3 STEPS -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+    <!-- STEP 1: Log Today's Sales -->
+    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+      <div>
+        <div class="flex items-center space-x-2 mb-3">
+          <span class="w-7 h-7 bg-amber-500 text-slate-900 rounded-full font-black text-sm flex items-center justify-center">1</span>
+          <h2 class="font-bold text-slate-900 text-base">Log Today's Credit Sales</h2>
+        </div>
+        <p class="text-xs text-slate-500 mb-4">Record credit invoices issued today. Duplicates rejected; sequence gaps flagged.</p>
+
+        <form action="/sales" method="POST" class="space-y-3" id="sales-form">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Invoice Number *</label>
+            <input type="text" name="invoice_number" required placeholder="e.g. INV-381"
+              class="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none">
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Retailer *</label>
+            <select name="retailer_id" required class="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none">
+              {% for r in retailers %}
+              <option value="{{ r.id }}">{{ r.name }} ({{ r.phone or 'No phone' }})</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Amount (ETB) *</label>
+              <input type="text" name="amount_etb" required placeholder="1250.00"
+                class="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Due Date *</label>
+              <input type="date" name="due_date" required value="{{ default_due_date.isoformat() }}"
+                class="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none">
+            </div>
+          </div>
+
+          <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-2.5 rounded-lg shadow transition mt-2">
+            Record Credit Sale
+          </button>
+        </form>
+      </div>
+
+      <!-- Bulk CSV Upload for Sales -->
+      <div class="mt-4 pt-4 border-t border-slate-100">
+        <label class="block text-xs font-bold text-slate-700 mb-1">Or Bulk Import Sales CSV</label>
+        <form action="/sales/bulk" method="POST" enctype="multipart/form-data" class="flex gap-2">
+          <input type="file" name="file" accept=".csv" required class="text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200">
+          <button type="submit" class="bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold px-3 py-1.5 rounded transition">Upload</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- STEP 2: Import Today's Statement -->
+    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+      <div>
+        <div class="flex items-center space-x-2 mb-3">
+          <span class="w-7 h-7 bg-amber-500 text-slate-900 rounded-full font-black text-sm flex items-center justify-center">2</span>
+          <h2 class="font-bold text-slate-900 text-base">Import Today's Statement</h2>
+        </div>
+        <p class="text-xs text-slate-500 mb-4">Ingest CBE CSV, Telebirr XLSX, or Dashen CSV. Ingests payment lines as L2 evidence and triggers deterministic matching.</p>
+
+        <form action="/statements/upload" method="POST" enctype="multipart/form-data" class="space-y-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Bank / Wallet Source *</label>
+            <select name="source_name" class="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none">
+              <option value="cbe_csv">Commercial Bank of Ethiopia (CBE) · CSV</option>
+              <option value="telebirr_xlsx">Telebirr Mobile Money · XLSX</option>
+              <option value="dashen_csv">Dashen Bank · CSV</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Statement File (.csv or .xlsx) *</label>
+            <input type="file" name="file" accept=".csv,.xlsx" required
+              class="w-full text-xs text-slate-500 file:mr-3 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-amber-100 file:text-amber-900 hover:file:bg-amber-200">
+          </div>
+
+          <button type="submit" class="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 font-extrabold text-xs py-2.5 rounded-lg shadow transition">
+            Import & Run Auto-Matcher
+          </button>
+        </form>
+      </div>
+
+      <div class="mt-4 pt-4 border-t border-slate-100 text-xs text-slate-400">
+        Deterministic rules: Tier A (exact ref & amount), Tier B (phone & date window), Tier C (fuzzy name).
+      </div>
+    </div>
+
+    <!-- STEP 3: Review Queue Status Box -->
+    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+      <div>
+        <div class="flex items-center space-x-2 mb-3">
+          <span class="w-7 h-7 bg-amber-500 text-slate-900 rounded-full font-black text-sm flex items-center justify-center">3</span>
+          <h2 class="font-bold text-slate-900 text-base">Approve Proposed Matches</h2>
+        </div>
+        <p class="text-xs text-slate-500 mb-4">Confirm proposed partial, combined, or ambiguous payments to update debtor ledgers.</p>
+
+        <div class="bg-slate-50 rounded-lg p-4 border border-slate-200 text-center space-y-2">
+          <div class="text-3xl font-black text-amber-600">{{ proposed_items|length }}</div>
+          <div class="text-xs font-bold text-slate-700">Payments Pending Review</div>
+          <div class="text-xs text-slate-400">
+            {% if proposed_items %}
+            Requires owner/cashier confirmation below.
+            {% else %}
+            All matches approved for today.
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <a href="#review-queue-section" class="w-full text-center block bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs py-2.5 rounded-lg transition mt-4">
+        Jump to Review Queue ↓
+      </a>
+    </div>
+
+  </div>
+
+  <!-- Review Queue Component -->
+  <section id="review-queue-section" class="pt-2">
+    {% include "partials/review_queue.html" %}
+  </section>
+
+  <!-- Aging Report Component -->
+  <section id="aging-section" class="pt-2">
+    {% include "partials/aging_table.html" %}
+  </section>
+
+</div>
+{% endblock %}

@@ -1,0 +1,62 @@
+<div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+  <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+    <div>
+      <h3 class="font-bold text-slate-900 text-lg">Accounts Receivable Aging Report</h3>
+      <p class="text-xs text-slate-500">As of {{ report.as_of_date.strftime('%d %B %Y') }} · Only confirmed payments reduce balances</p>
+    </div>
+    <div class="text-right">
+      <span class="text-xs text-slate-500 uppercase tracking-wider block">Total Outstanding</span>
+      <span class="text-xl font-black text-slate-900">{{ report.grand_total_outstanding_etb }}</span>
+    </div>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="w-full text-left text-sm">
+      <thead class="bg-slate-100/75 text-slate-600 uppercase text-xs tracking-wider border-b border-slate-200">
+        <tr>
+          <th class="px-6 py-3">Retailer</th>
+          <th class="px-4 py-3 text-right">Current</th>
+          <th class="px-4 py-3 text-right">1 - 30 Days</th>
+          <th class="px-4 py-3 text-right text-amber-700">31 - 60 Days</th>
+          <th class="px-4 py-3 text-right text-orange-700">61 - 90 Days</th>
+          <th class="px-4 py-3 text-right text-red-700">90+ Days</th>
+          <th class="px-6 py-3 text-right font-bold">Total Overdue</th>
+          <th class="px-6 py-3 text-right font-bold">Total Balance</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100 font-medium">
+        {% for ret in report.retailers %}
+        <tr class="hover:bg-slate-50/75 transition">
+          <td class="px-6 py-3.5">
+            <div class="font-bold text-slate-900">{{ ret.retailer_name }}</div>
+            <div class="text-xs text-slate-400">{{ ret.phone or 'No phone' }}</div>
+          </td>
+          <td class="px-4 py-3.5 text-right text-slate-600">{{ ret.current_santim // 100 }}.{{ '%02d'|format(ret.current_santim % 100) }}</td>
+          <td class="px-4 py-3.5 text-right text-slate-700">{{ ret.days_1_30_santim // 100 }}.{{ '%02d'|format(ret.days_1_30_santim % 100) }}</td>
+          <td class="px-4 py-3.5 text-right text-amber-700">{{ ret.days_31_60_santim // 100 }}.{{ '%02d'|format(ret.days_31_60_santim % 100) }}</td>
+          <td class="px-4 py-3.5 text-right text-orange-700">{{ ret.days_61_90_santim // 100 }}.{{ '%02d'|format(ret.days_61_90_santim % 100) }}</td>
+          <td class="px-4 py-3.5 text-right text-red-700 font-semibold">{{ ret.days_90_plus_santim // 100 }}.{{ '%02d'|format(ret.days_90_plus_santim % 100) }}</td>
+          <td class="px-6 py-3.5 text-right font-bold text-red-600">{{ ret.total_overdue_etb }}</td>
+          <td class="px-6 py-3.5 text-right font-extrabold text-slate-900">{{ ret.total_outstanding_etb }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="8" class="px-6 py-8 text-center text-slate-400">No open receivables found. All invoices settled.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot class="bg-slate-100 font-bold border-t-2 border-slate-300 text-slate-900">
+        <tr>
+          <td class="px-6 py-3 uppercase text-xs tracking-wider">Grand Total</td>
+          <td class="px-4 py-3 text-right">{{ report.total_current_santim // 100 }}.{{ '%02d'|format(report.total_current_santim % 100) }}</td>
+          <td class="px-4 py-3 text-right">{{ report.total_1_30_santim // 100 }}.{{ '%02d'|format(report.total_1_30_santim % 100) }}</td>
+          <td class="px-4 py-3 text-right text-amber-800">{{ report.total_31_60_santim // 100 }}.{{ '%02d'|format(report.total_31_60_santim % 100) }}</td>
+          <td class="px-4 py-3 text-right text-orange-800">{{ report.total_61_90_santim // 100 }}.{{ '%02d'|format(report.total_61_90_santim % 100) }}</td>
+          <td class="px-4 py-3 text-right text-red-800">{{ report.total_90_plus_santim // 100 }}.{{ '%02d'|format(report.total_90_plus_santim % 100) }}</td>
+          <td class="px-6 py-3 text-right text-red-700">{{ report.grand_total_overdue_etb }}</td>
+          <td class="px-6 py-3 text-right font-black text-slate-900 text-base">{{ report.grand_total_outstanding_etb }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
