@@ -1,0 +1,13 @@
+{
+  "source_name": "cbe_csv",
+  "evidence_level": "L2",
+  "date_column": "Posting Date",
+  "date_format": "%d/%m/%Y",
+  "amount_column": "Credit Amount",
+  "reference_column": "Reference No",
+  "narrative_column": "Description",
+  "counterparty_name_column": "Counterparty Name",
+  "counterparty_account_column": "Counterparty Account",
+  "tx_id_column": "Transaction ID",
+  "skip_rows": 0
+}

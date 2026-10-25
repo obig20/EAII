@@ -1,0 +1,13 @@
+{
+  "source_name": "dashen_csv",
+  "evidence_level": "L2",
+  "date_column": "Value Date",
+  "date_format": "%d-%b-%Y",
+  "amount_column": "Credit",
+  "reference_column": "Narration",
+  "narrative_column": "Transaction Details",
+  "counterparty_name_column": "Customer Name",
+  "counterparty_account_column": "Source Account",
+  "tx_id_column": "Txn Ref",
+  "skip_rows": 1
+}
