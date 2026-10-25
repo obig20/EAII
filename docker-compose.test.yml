@@ -1,0 +1,32 @@
+services:
+  db_test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: dailyclose_test
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: testpass
+      POSTGRES_HOST_AUTH_METHOD: md5
+    volumes:
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    tmpfs:
+      - /var/lib/postgresql/data   # in-memory for speed
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d dailyclose_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  test:
+    build: .
+    command: pytest tests/ -v --tb=short --cov=app --cov-report=term-missing
+    depends_on:
+      db_test:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql+psycopg://app:testpass@db_test:5432/dailyclose_test
+      - DATABASE_MIGRATION_URL=postgresql+psycopg://postgres:testpass@db_test:5432/dailyclose_test
+      - SECRET_KEY=test-secret-key-not-for-production-use
+      - LOG_LEVEL=DEBUG
+      - TESTING=true
+    volumes:
+      - .:/app
