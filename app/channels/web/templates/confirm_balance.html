@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Balance Confirmation — {{ retailer.name }} | Daily Close</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased min-h-screen py-8 px-4 sm:px-6">
+
+  <div class="max-w-2xl mx-auto space-y-6">
+
+    <!-- Header card -->
+    <div class="bg-slate-900 text-white p-6 rounded-2xl shadow-lg border border-slate-800">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
+        <div>
+          <span class="text-xs font-bold uppercase tracking-wider text-amber-400">DAILY CLOSE · RETAILER PORTAL</span>
+          <h1 class="text-xl font-black mt-1">Balance Confirmation Statement</h1>
+        </div>
+        <div class="text-right">
+          <span class="text-xs text-slate-400 block">ዕለታዊ ሂሳብ ማረጋገጫ</span>
+          <span class="text-xs font-medium text-emerald-400">● Secure Signed Link</span>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4 text-sm">
+        <div>
+          <span class="text-slate-400 text-xs block">Wholesaler / Distributor</span>
+          <span class="font-bold text-white text-base">{{ tenant.name }}</span>
+        </div>
+        <div class="text-right">
+          <span class="text-slate-400 text-xs block">Retailer Account</span>
+          <span class="font-bold text-white text-base">{{ retailer.name }}</span>
+          <span class="text-xs text-slate-400 block">{{ retailer.phone or 'No phone listed' }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Outstanding Balance summary card -->
+    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+      <div>
+        <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Total Outstanding Balance</span>
+        <div class="text-3xl font-black text-slate-900 mt-1">{{ total_outstanding_etb }}</div>
+        <span class="text-xs text-slate-500">As of {{ as_of_date.strftime('%d %B %Y') }} · {{ invoices|length }} open invoice(s)</span>
+      </div>
+      <div class="text-right">
+        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900">
+          Awaiting Your Review
+        </span>
+      </div>
+    </div>
+
+    <!-- Open Invoices Table -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 font-bold text-slate-800 text-sm">
+        Open Invoice Breakdown
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-slate-100 text-slate-600 uppercase text-xs">
+            <tr>
+              <th class="px-6 py-3">Invoice #</th>
+              <th class="px-4 py-3">Issue Date</th>
+              <th class="px-4 py-3">Due Date</th>
+              <th class="px-6 py-3 text-right">Amount (ETB)</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            {% for inv in invoices %}
+            <tr>
+              <td class="px-6 py-3 font-bold text-slate-900">{{ inv.invoice_number }}</td>
+              <td class="px-4 py-3 text-slate-600">{{ inv.issued_date.strftime('%d %b %Y') }}</td>
+              <td class="px-4 py-3 text-slate-600">{{ inv.due_date.strftime('%d %b %Y') }}</td>
+              <td class="px-6 py-3 text-right font-extrabold text-slate-900">
+                {{ inv.amount_santim // 100 }}.{{ '%02d'|format(inv.amount_santim % 100) }} ETB
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="4" class="px-6 py-6 text-center text-slate-400">No open invoices found.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Action Choice: Confirm or Dispute -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+      <!-- OPTION 1: CONFIRM -->
+      <div class="bg-white p-6 rounded-2xl border-2 border-emerald-500 shadow-sm flex flex-col justify-between">
+        <div>
+          <div class="flex items-center space-x-2 text-emerald-800 mb-2">
+            <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            <h2 class="font-bold text-lg">Option 1: Confirm Balance</h2>
+          </div>
+          <p class="text-xs text-slate-600 mb-4">
+            If this statement accurately matches your accounts, click confirm.
+          </p>
+
+          <form action="/confirm-balance/{{ raw_token }}/confirm" method="POST" class="space-y-4">
+            <!-- Optional explicit payment details (L3 Evidence) -->
+            <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+              <span class="font-bold text-slate-700 block">Did you already pay all or part of this? (Optional)</span>
+              <p class="text-slate-500">Providing payment details records verified evidence for your distributor:</p>
+              <div>
+                <input type="text" name="payment_ref" placeholder="Payment Reference / Txn ID (e.g. FT12345678)"
+                  class="w-full px-2.5 py-1.5 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-emerald-500">
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <input type="text" name="payment_amount_etb" placeholder="Amount Paid (ETB)"
+                  class="w-full px-2.5 py-1.5 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-emerald-500">
+                <input type="date" name="payment_date"
+                  class="w-full px-2.5 py-1.5 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-emerald-500">
+              </div>
+            </div>
+
+            <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm py-3 rounded-xl shadow transition">
+              ✓ Confirm Balance (ትክክል ነው አረጋግጥ)
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- OPTION 2: DISPUTE -->
+      <div class="bg-white p-6 rounded-2xl border-2 border-red-400 shadow-sm flex flex-col justify-between">
+        <div>
+          <div class="flex items-center space-x-2 text-red-800 mb-2">
+            <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            <h2 class="font-bold text-lg">Option 2: Dispute Balance</h2>
+          </div>
+          <p class="text-xs text-slate-600 mb-4">
+            If any invoice or amount is incorrect, submit a dispute with a reason code.
+          </p>
+
+          <form action="/confirm-balance/{{ raw_token }}/dispute" method="POST" class="space-y-3">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Reason Code *</label>
+              <select name="reason_code" required class="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-red-500">
+                <option value="ALREADY_PAID">Already Paid (ክፍያ ተፈጽሟል)</option>
+                <option value="WRONG_AMOUNT">Incorrect Amount (የተሳሳተ መጠን)</option>
+                <option value="GOODS_RETURNED">Goods Returned / Not Received (እቃ ተመልሷል)</option>
+                <option value="UNRECOGNIZED">Unrecognized Invoice (የማይታወቅ ደረሰኝ)</option>
+                <option value="OTHER">Other Reason (ሌላ)</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Explanation *</label>
+              <textarea name="explanation" required rows="3" placeholder="Please provide specific details..."
+                class="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-red-500"></textarea>
+            </div>
+
+            <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-black text-sm py-3 rounded-xl shadow transition">
+              ✕ Dispute Statement (ተቃውሞ አስገባ)
+            </button>
+          </form>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Footer info -->
+    <div class="text-center text-xs text-slate-500 pt-4">
+      Daily Close &copy; 2026 Birana Technology, Addis Ababa. This is a secure one-time verification link.
+    </div>
+
+  </div>
+
+</body>
+</html>

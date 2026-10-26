@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.channels.web.rate_limit import confirmation_rate_limiter
 from app.importers.base import parse_amount_santim, parse_statement_date
 from app.importers.csv_importer import CsvStatementImporter
 from app.importers.mapping import (
@@ -32,6 +33,17 @@ from app.kernel.enums import EvidenceLevel, InvoiceState, MatchState, PaymentSta
 from app.kernel.guards import InsufficientEvidenceError, assert_confirmable
 from app.kernel.models import ImportBatch, Invoice, PaymentLine, PaymentMatch, Retailer, Tenant, User
 from app.kernel.money import to_etb
+from app.kernel.retailer_confirmation import (
+    DisputeReasonCode,
+    TokenAlreadyUsedError,
+    TokenError,
+    TokenExpiredError,
+    TokenNotFoundError,
+    confirm_retailer_balance,
+    create_retailer_confirmation_token,
+    dispute_retailer_balance,
+    validate_confirmation_token,
+)
 from app.kernel.sales import DuplicateInvoiceError, InvalidSaleError, parse_and_record_sales_csv, record_credit_sale
 from app.kernel.tenant import set_tenant
 from app.matching.matcher import PaymentMatcher
@@ -498,4 +510,160 @@ def download_accountant_csv(
         content=content,
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=partner_accountant_export.csv"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Retailer Balance Confirmation & Token Routes (Feature D)
+# ---------------------------------------------------------------------------
+@router.post("/retailers/{retailer_id}/confirmation-token")
+def generate_confirmation_token_endpoint(
+    retailer_id: str,
+    session: Session = Depends(get_session),
+    context: tuple[Tenant, User] = Depends(get_current_tenant_and_user),
+):
+    tenant, user = context
+    set_tenant(session, tenant.id)
+    try:
+        rid = uuid.UUID(retailer_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid retailer ID")
+
+    retailer = session.get(Retailer, rid)
+    if not retailer or retailer.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="Retailer not found")
+
+    token_rec, raw_token = create_retailer_confirmation_token(
+        session,
+        tenant_id=tenant.id,
+        retailer_id=retailer.id,
+        expires_in_days=7,
+    )
+    session.commit()
+
+    link = f"/confirm-balance/{raw_token}"
+    return {"token_id": str(token_rec.id), "raw_token": raw_token, "link": link}
+
+
+@router.get(
+    "/confirm-balance/{raw_token}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(confirmation_rate_limiter)],
+)
+def view_balance_confirmation(
+    request: Request,
+    raw_token: str,
+    session: Session = Depends(get_session),
+):
+    try:
+        token_rec, retailer, invoices = validate_confirmation_token(session, raw_token=raw_token)
+    except TokenError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    tenant = session.get(Tenant, token_rec.tenant_id)
+    total_santim = sum(inv.amount_santim for inv in invoices)
+    today = datetime.now(timezone.utc).date()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="confirm_balance.html",
+        context={
+            "tenant": tenant,
+            "retailer": retailer,
+            "invoices": invoices,
+            "total_outstanding_etb": to_etb(total_santim),
+            "as_of_date": today,
+            "raw_token": raw_token,
+        },
+    )
+
+
+@router.post(
+    "/confirm-balance/{raw_token}/confirm",
+    response_class=HTMLResponse,
+    dependencies=[Depends(confirmation_rate_limiter)],
+)
+def submit_balance_confirmation(
+    request: Request,
+    raw_token: str,
+    payment_ref: str = Form(None),
+    payment_amount_etb: str = Form(None),
+    payment_date: str = Form(None),
+    session: Session = Depends(get_session),
+):
+    try:
+        token_rec, retailer, _ = validate_confirmation_token(session, raw_token=raw_token)
+    except TokenError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    tenant = session.get(Tenant, token_rec.tenant_id)
+    set_tenant(session, token_rec.tenant_id)
+
+    explicit_payments = []
+    if payment_amount_etb and payment_amount_etb.strip():
+        explicit_payments.append({
+            "amount_etb": payment_amount_etb.strip(),
+            "source_ref": payment_ref.strip() if payment_ref else None,
+            "value_date": payment_date.strip() if payment_date else None,
+        })
+
+    _, created_l3 = confirm_retailer_balance(
+        session,
+        token_record=token_rec,
+        explicit_payments=explicit_payments if explicit_payments else None,
+    )
+    session.commit()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="confirm_result.html",
+        context={
+            "title": "Confirmation Successful",
+            "status": "confirmed",
+            "tenant": tenant,
+            "retailer": retailer,
+            "l3_count": len(created_l3),
+        },
+    )
+
+
+@router.post(
+    "/confirm-balance/{raw_token}/dispute",
+    response_class=HTMLResponse,
+    dependencies=[Depends(confirmation_rate_limiter)],
+)
+def submit_balance_dispute(
+    request: Request,
+    raw_token: str,
+    reason_code: str = Form(...),
+    explanation: str = Form(...),
+    session: Session = Depends(get_session),
+):
+    try:
+        token_rec, retailer, _ = validate_confirmation_token(session, raw_token=raw_token)
+    except TokenError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    tenant = session.get(Tenant, token_rec.tenant_id)
+    set_tenant(session, token_rec.tenant_id)
+
+    dispute_retailer_balance(
+        session,
+        token_record=token_rec,
+        reason_code=reason_code,
+        explanation=explanation,
+    )
+    session.commit()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="confirm_result.html",
+        context={
+            "title": "Dispute Submitted",
+            "status": "disputed",
+            "tenant": tenant,
+            "retailer": retailer,
+            "reason_code": reason_code,
+            "explanation": explanation,
+        },
     )

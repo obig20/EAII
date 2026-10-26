@@ -1,0 +1,19 @@
+{
+  "welcome": "Welcome to Daily Close (Birana Technology, Addis Ababa)!\nTrack credit sales, bank receipts, and daily collections in ETB.",
+  "ask_invite_code": "Please enter your registration invite code to connect your account:",
+  "registered": "Registration successful! You are connected as {role} for {tenant}.",
+  "invalid_invite_code": "Invalid or expired invite code. Please contact your company administrator.",
+  "quick_entry_success": "✓ Credit sale recorded: {invoice_number}\nRetailer: {retailer_name}\nAmount: {amount_etb} ETB\nDue Date: {due_date}",
+  "quick_entry_gap_warning": "⚠️ Sequence gap detected! Missing invoice numbers: {gaps}",
+  "quick_entry_duplicate_error": "✕ Rejection: Invoice number {invoice_number} already exists for your business.",
+  "quick_entry_syntax_error": "✕ Format error. Please use: 'INV381 | Retailer Name | Amount | due 30d'\nExample: INV-402 | Abebe Grocery | 150000 | due 30d",
+  "photo_received_l4": "📷 Payment screenshot received and stored as Evidence Level L4 (unverified).\nProposed payment of {amount_etb} ETB created and queued for review.\n\n⚠️ Non-Negotiable Rule: L4 evidence is NEVER counted as confirmed paid until verified against a bank/Telebirr statement.",
+  "match_confirmed": "✓ Match confirmed successfully.",
+  "match_accepted_unverified": "✓ Marked as accepted_unverified (L4).\nNote: This amount is NEVER counted as confirmed paid in totals or accountant exports.",
+  "match_rejected": "✕ Match rejected.",
+  "only_owner_can_accept_unverified": "✕ Permission denied: Only owners can mark L4 items as accepted_unverified.",
+  "l4_cannot_confirm": "✕ Rule 2 Violation: L4 screenshot evidence cannot be confirmed directly. The owner may mark it 'accepted_unverified' or match it with an imported bank statement line.",
+  "morning_brief_header": "☀️ MORNING COLLECTIONS BRIEF — Addis Ababa (EAT)",
+  "aging_header": "📊 ACCOUNTS RECEIVABLE AGING SUMMARY",
+  "help_text": "Daily Close Commands:\n• Quick Entry: 'INV381 | Retailer | Amount | due 30d'\n• Photo Upload: Send a receipt photo for L4 review\n• /brief: Morning collections brief\n• /aging: Receivables aging breakdown\n• /review: Pending match review queue\n• /lang [en|am]: Switch language"
+}
