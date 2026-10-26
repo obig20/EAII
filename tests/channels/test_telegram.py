@@ -43,6 +43,7 @@ from app.channels.telegram.quick_entry import parse_quick_entry_text, process_qu
 from app.kernel.enums import EvidenceLevel, InvoiceState, MatchState, PaymentState, UserRole
 from app.kernel.guards import InsufficientEvidenceError, assert_confirmable
 from app.kernel.models import ImportBatch, Invoice, PaymentLine, PaymentMatch, Retailer, Tenant, User
+from app.kernel.tenant import set_tenant
 
 
 @pytest.fixture(autouse=True)
@@ -61,6 +62,7 @@ def tg_tenant(db_session: Session) -> Tenant:
     t = Tenant(id=uuid.uuid4(), name="Telegram Test Wholesaler", created_at=datetime.now(timezone.utc))
     db_session.add(t)
     db_session.flush()
+    set_tenant(db_session, t.id)
     return t
 
 
@@ -170,6 +172,7 @@ class TestTelegramInviteRegistration:
         tg_tenant: Tenant,
     ):
         code = generate_invite_code(
+            db_session,
             tenant_id=tg_tenant.id,
             role=UserRole.CASHIER.value,
             display_name="Kassahun Cashier",

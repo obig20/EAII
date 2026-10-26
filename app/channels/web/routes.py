@@ -1,7 +1,11 @@
 """
 app/channels/web/routes.py
 
-Web routes for Daily Close dashboard, 3 daily close steps, exports, and match review.
+Web routes for Daily Close:
+- Authentication (login, logout, logout-all) with Argon2id and DB session tokens
+- Dashboard, 3 daily close steps, exports, and match review
+- Staff user management (owner-only)
+- Public retailer balance confirmation with persistent rate limiting
 """
 
 from __future__ import annotations
@@ -13,13 +17,19 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from app.channels.web.rate_limit import confirmation_rate_limiter
+from app.channels.web.auth_deps import (
+    SESSION_COOKIE_NAME,
+    get_current_session_info,
+    get_current_user_and_tenant,
+    require_owner,
+    verify_csrf,
+)
 from app.importers.base import parse_amount_santim, parse_statement_date
 from app.importers.csv_importer import CsvStatementImporter
 from app.importers.mapping import (
@@ -29,11 +39,28 @@ from app.importers.mapping import (
     ColumnMappingConfig,
 )
 from app.importers.xlsx_importer import XlsxStatementImporter
+from app.kernel.auth import (
+    create_user_session,
+    generate_csrf_token,
+    hash_password,
+    normalize_identifier,
+    terminate_all_user_sessions,
+    terminate_session,
+    validate_session_token,
+    verify_password,
+)
 from app.kernel.db import get_session
 from app.kernel.enums import EvidenceLevel, InvoiceState, MatchState, PaymentState, UserRole
+from app.kernel.events import append_event
 from app.kernel.guards import InsufficientEvidenceError, assert_confirmable
-from app.kernel.models import ImportBatch, Invoice, PaymentLine, PaymentMatch, Retailer, Tenant, User
+from app.kernel.models import ImportBatch, Invoice, PaymentLine, PaymentMatch, Retailer, Session as SessionModel, Tenant, User
 from app.kernel.money import to_etb
+from app.kernel.persistent_rate_limit import (
+    RateLimitExceededError,
+    check_persistent_rate_limit,
+    record_failed_login,
+    record_successful_login,
+)
 from app.kernel.retailer_confirmation import (
     DisputeReasonCode,
     TokenAlreadyUsedError,
@@ -48,9 +75,11 @@ from app.kernel.retailer_confirmation import (
 from app.kernel.sales import DuplicateInvoiceError, InvalidSaleError, parse_and_record_sales_csv, record_credit_sale
 from app.kernel.tenant import set_tenant
 from app.matching.matcher import PaymentMatcher
+from app.matching.normalization import normalize_phone
 from app.reports.aging import generate_aging_report
 from app.reports.exports import export_accountant_csv, export_payments_csv, export_sales_csv
 from app.reports.morning_brief import generate_morning_brief_text
+from app.settings import settings
 
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -65,7 +94,7 @@ ALLOWED_STATEMENT_EXTENSIONS = {".csv", ".xlsx"}
 def validate_uploaded_file(file: UploadFile, allowed_extensions: set[str]) -> str:
     """Validate filename extension and sanitize path."""
     raw_name = file.filename or ""
-    safe_name = Path(raw_name).name  # Strips directory traversal (/ or \)
+    safe_name = Path(raw_name).name  # Strips directory traversal (/ or \\)
     ext = Path(safe_name).suffix.lower()
     if not ext or ext not in allowed_extensions:
         raise HTTPException(
@@ -74,58 +103,409 @@ def validate_uploaded_file(file: UploadFile, allowed_extensions: set[str]) -> st
         )
     return safe_name
 
+
+def _get_client_ip(request: Request) -> str:
+    """Extract client IP address for persistent rate limiting."""
+    x_forwarded = request.headers.get("x-forwarded-for")
+    if x_forwarded:
+        return x_forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "127.0.0.1"
+
+
 router = APIRouter()
 
 
-def get_current_tenant_and_user(
-    session: Session = Depends(get_session),
-    x_tenant_id: str | None = Header(None),
-    x_user_role: str | None = Header(None),
-    role: str | None = Query(None),
-) -> tuple[Tenant, User]:
-    """Resolve current tenant and user context. Creates default if DB empty."""
-    # 1. Resolve Tenant
-    tenant: Tenant | None = None
-    if x_tenant_id:
+# ---------------------------------------------------------------------------
+# Authentication Routes (Web Login, Logout, Logout-Everywhere)
+# ---------------------------------------------------------------------------
+@router.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, session: Session = Depends(get_session)):
+    """Render login form. Redirects to /dashboard if session already active."""
+    raw_token = request.cookies.get(SESSION_COOKIE_NAME)
+    if raw_token:
         try:
-            tid = uuid.UUID(x_tenant_id)
-            tenant = session.get(Tenant, tid)
-        except ValueError:
+            validate_session_token(
+                session,
+                raw_token=raw_token,
+                idle_timeout_minutes=settings.session_idle_timeout_minutes,
+            )
+            return RedirectResponse("/dashboard", status_code=303)
+        except Exception:
             pass
 
-    if not tenant:
-        tenant = session.execute(select(Tenant).order_by(Tenant.created_at)).scalars().first()
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={"error": None},
+    )
 
+
+# Global dummy Argon2id hash for constant-time verification parity on unknown/locked accounts (SEC-12)
+_DUMMY_ARGON2_HASH = "$argon2id$v=19$m=65536,t=3,p=4$dummyhashfordummyuserverificationtiming$dummyhashfordummyuserverificationtiming"
+
+
+@router.post("/login")
+def login_submit(
+    request: Request,
+    identifier: str = Form(...),
+    password: str = Form(...),
+    session: Session = Depends(get_session),
+):
+    """
+    Authenticate user with email or phone + password (Argon2id).
+    Enforces persistent IP rate limiting and 15-minute account lockout after 5 failures.
+    Sets HttpOnly session cookie on success.
+    """
+    client_ip = _get_client_ip(request)
+
+    # 1. IP-level persistent rate limiting (10 attempts / minute, 5m lockout)
+    try:
+        check_persistent_rate_limit(
+            session,
+            key=f"login:ip:{client_ip}",
+            max_requests=10,
+            window_seconds=60,
+            lockout_seconds=300,
+        )
+    except RateLimitExceededError as exc:
+        session.commit()
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
+            context={"error": str(exc)},
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
+    # 2. Normalize identifier (email or phone)
+    clean_id = normalize_identifier(identifier)
     now = datetime.now(timezone.utc)
-    if not tenant:
-        tenant = Tenant(id=uuid.uuid4(), name="Birana Addis Wholesalers", created_at=now)
-        session.add(tenant)
-        session.flush()
 
-    # Set transaction tenant context for RLS
+    # 3. Look up user across tenants via SECURITY DEFINER function under app role (SEC-09)
+    user_row = None
+    if session.bind and session.bind.dialect.name == "postgresql":
+        user_row = session.execute(
+            text("SELECT id, tenant_id, role, display_name, email, phone, password_hash, is_active, failed_login_attempts, locked_until FROM lookup_user_by_identifier(:ident)"),
+            {"ident": clean_id},
+        ).mappings().first()
+    else:
+        u = session.execute(
+            select(User).where(
+                (func.lower(User.email) == clean_id.lower()) | (User.phone == clean_id)
+            )
+        ).scalars().first()
+        if u:
+            user_row = {
+                "id": u.id,
+                "tenant_id": u.tenant_id,
+                "role": u.role,
+                "display_name": u.display_name,
+                "email": u.email,
+                "phone": u.phone,
+                "password_hash": u.password_hash,
+                "is_active": u.is_active,
+                "failed_login_attempts": u.failed_login_attempts,
+                "locked_until": u.locked_until,
+            }
+
+    # Dummy Argon2id hash for constant-time verification parity on unknown/locked accounts (SEC-12)
+    _DUMMY_ARGON2_HASH = "$argon2id$v=19$m=65536,t=3,p=4$dummyhashfordummyuserverificationtiming$dummyhashfordummyuserverificationtiming"
+
+    # 4. Check if account exists, is active, and is not locked
+    if not user_row or not user_row["is_active"]:
+        verify_password(_DUMMY_ARGON2_HASH, password)
+        record_failed_login(session, user=None, ip_address=client_ip, identifier=clean_id)
+        session.commit()
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
+            context={"error": "Invalid identifier or password."},
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    # If locked, invoke dummy verify for timing parity and return identical 401 response
+    if user_row["locked_until"] and user_row["locked_until"] > now:
+        verify_password(_DUMMY_ARGON2_HASH, password)
+        set_tenant(session, user_row["tenant_id"])
+        user = session.get(User, user_row["id"])
+        record_failed_login(session, user=user, ip_address=client_ip)
+        session.commit()
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
+            context={"error": "Invalid identifier or password."},
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    # 5. Verify Argon2id password hash under tenant context
+    set_tenant(session, user_row["tenant_id"])
+    user = session.get(User, user_row["id"])
+
+    if not user or not verify_password(user.password_hash, password):
+        record_failed_login(session, user=user, ip_address=client_ip)
+        session.commit()
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
+            context={"error": "Invalid identifier or password."},
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    # 6. Login Success: reset counter, issue opaque session token
+    record_successful_login(session, user=user, ip_address=client_ip)
+    session_rec, raw_token = create_user_session(
+        session,
+        user=user,
+        ip_address=client_ip,
+        user_agent=request.headers.get("user-agent"),
+        lifetime_hours=settings.session_lifetime_hours,
+    )
+    session.commit()
+
+    resp = RedirectResponse("/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+    resp.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=raw_token,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="lax",
+        max_age=settings.session_lifetime_hours * 3600,
+        path="/",
+    )
+    return resp
+
+
+@router.post("/logout")
+def logout(
+    request: Request,
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+    _csrf: None = Depends(verify_csrf),
+):
+    """Log out current session and clear cookie."""
+    raw_token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not raw_token:
+        auth_hdr = request.headers.get("Authorization")
+        if auth_hdr and auth_hdr.startswith("Bearer "):
+            raw_token = auth_hdr[7:].strip()
+
+    if raw_token:
+        terminate_session(session, raw_token=raw_token)
+        session.commit()
+
+    resp = RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+    resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    return resp
+
+
+@router.post("/logout-all")
+def logout_all(
+    request: Request,
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+    _csrf: None = Depends(verify_csrf),
+):
+    """Log out everywhere: revoke all active sessions for current user."""
+    _, user, _ = session_info
+    terminate_all_user_sessions(session, user_id=user.id)
+    session.commit()
+
+    resp = RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+    resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# Staff User Management Routes (Owner Only)
+# ---------------------------------------------------------------------------
+@router.get("/settings/users", response_class=HTMLResponse)
+def list_users(
+    request: Request,
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+    msg: str | None = Query(None),
+):
+    """List staff accounts for current tenant."""
+    tenant, user, session_rec = session_info
+    if user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+
+    set_tenant(session, tenant.id)
+    users = session.execute(
+        select(User).where(User.tenant_id == tenant.id).order_by(User.created_at)
+    ).scalars().all()
+
+    csrf_token = generate_csrf_token(session_rec.id, settings.secret_key)
+    return templates.TemplateResponse(
+        request=request,
+        name="user_management.html",
+        context={
+            "tenant_name": tenant.name,
+            "user_role": user.role,
+            "users": users,
+            "csrf_token": csrf_token,
+            "message": msg,
+        },
+    )
+
+
+@router.post("/settings/users")
+def create_staff_user(
+    request: Request,
+    display_name: str = Form(...),
+    role: str = Form(...),
+    password: str = Form(...),
+    email: str | None = Form(None),
+    phone: str | None = Form(None),
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+    _csrf: None = Depends(verify_csrf),
+):
+    """Provision a new staff account under the owner's tenant."""
+    tenant, actor_user, _ = session_info
+    if actor_user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+
+    if role not in (UserRole.OWNER.value, UserRole.CASHIER.value):
+        raise HTTPException(status_code=400, detail="Invalid role. Must be owner or cashier.")
+
+    if len(password) < 10:
+        raise HTTPException(status_code=400, detail="Password must be at least 10 characters long.")
+
+    clean_email = email.strip().lower() if email and email.strip() else None
+    clean_phone = normalize_phone(phone.strip()) if phone and phone.strip() else None
+
+    if not clean_email and not clean_phone:
+        raise HTTPException(status_code=400, detail="Either email or phone is required.")
+
     set_tenant(session, tenant.id)
 
-    # 2. Resolve User & Role
-    user_role_str = (role or x_user_role or "owner").lower()
-    if user_role_str not in ("owner", "cashier"):
-        user_role_str = "owner"
-
-    user = session.execute(
-        select(User).where(User.tenant_id == tenant.id, User.role == user_role_str)
-    ).scalars().first()
-
-    if not user:
-        user = User(
-            id=uuid.uuid4(),
-            tenant_id=tenant.id,
-            role=user_role_str,
-            display_name=f"Addis {user_role_str.capitalize()}",
-            created_at=now,
+    # Check for duplicate identifier
+    existing = session.execute(
+        select(User).where(
+            (User.tenant_id == tenant.id) & (
+                ((func.lower(User.email) == clean_email) & (clean_email.isnot(None))) |
+                ((User.phone == clean_phone) & (clean_phone.isnot(None)))
+            )
         )
-        session.add(user)
-        session.flush()
+    ).scalars().first()
+    if existing:
+        raise HTTPException(status_code=400, detail="A user with this email or phone already exists in this tenant.")
 
-    return tenant, user
+    pwd_hash = hash_password(password)
+    now = datetime.now(timezone.utc)
+    new_user = User(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        role=role,
+        display_name=display_name.strip(),
+        email=clean_email,
+        phone=clean_phone,
+        password_hash=pwd_hash,
+        is_active=True,
+        created_at=now,
+    )
+    session.add(new_user)
+    session.flush()
+
+    append_event(
+        session,
+        tenant_id=tenant.id,
+        event_type="auth.user_created",
+        aggregate_type="user",
+        aggregate_id=new_user.id,
+        actor_id=actor_user.id,
+        payload={"role": role, "is_active": True},
+    )
+    session.commit()
+
+    return RedirectResponse("/settings/users?msg=User+account+created+successfully", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/settings/users/{user_id}/reset-password")
+def reset_staff_password(
+    user_id: str,
+    new_password: str = Form(...),
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+    _csrf: None = Depends(verify_csrf),
+):
+    """Owner reset of staff user password with immediate session revocation."""
+    tenant, actor_user, _ = session_info
+    if actor_user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user ID.")
+
+    if len(new_password) < 10:
+        raise HTTPException(status_code=400, detail="New password must be at least 10 characters long.")
+
+    set_tenant(session, tenant.id)
+    target_user = session.get(User, uid)
+    if not target_user or target_user.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    target_user.password_hash = hash_password(new_password)
+    target_user.failed_login_attempts = 0
+    target_user.locked_until = None
+    terminate_all_user_sessions(session, user_id=target_user.id)
+
+    append_event(
+        session,
+        tenant_id=tenant.id,
+        event_type="auth.password_reset",
+        aggregate_type="user",
+        aggregate_id=target_user.id,
+        actor_id=actor_user.id,
+        payload={},
+    )
+    session.commit()
+
+    return RedirectResponse("/settings/users?msg=Password+reset+successfully", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/settings/users/{user_id}/deactivate")
+def deactivate_staff_user(
+    user_id: str,
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+    _csrf: None = Depends(verify_csrf),
+):
+    """Deactivate a staff user account and terminate all their active sessions immediately."""
+    tenant, actor_user, _ = session_info
+    if actor_user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user ID.")
+
+    if uid == actor_user.id:
+        raise HTTPException(status_code=400, detail="Cannot deactivate your own account.")
+
+    set_tenant(session, tenant.id)
+    target_user = session.get(User, uid)
+    if not target_user or target_user.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    target_user.is_active = False
+    terminate_all_user_sessions(session, user_id=target_user.id)
+
+    append_event(
+        session,
+        tenant_id=tenant.id,
+        event_type="auth.user_deactivated",
+        aggregate_type="user",
+        aggregate_id=target_user.id,
+        actor_id=actor_user.id,
+        payload={},
+    )
+    session.commit()
+
+    return RedirectResponse("/settings/users?msg=User+deactivated+successfully", status_code=status.HTTP_303_SEE_OTHER)
 
 
 # ---------------------------------------------------------------------------
@@ -136,10 +516,10 @@ def get_current_tenant_and_user(
 def dashboard(
     request: Request,
     session: Session = Depends(get_session),
-    context: tuple[Tenant, User] = Depends(get_current_tenant_and_user),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
     msg: str | None = Query(None),
 ):
-    tenant, user = context
+    tenant, user, session_rec = session_info
     set_tenant(session, tenant.id)
     today = datetime.now(timezone.utc).date()
 
@@ -195,6 +575,8 @@ def dashboard(
             "is_ambiguous": is_ambiguous,
         })
 
+    csrf_token = generate_csrf_token(session_rec.id, settings.secret_key)
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -208,6 +590,7 @@ def dashboard(
             "report": aging_rep,
             "proposed_items": proposed_items,
             "message": msg,
+            "csrf_token": csrf_token,
         },
     )
 
@@ -222,9 +605,10 @@ def create_sale(
     amount_etb: str = Form(...),
     due_date: str = Form(...),
     session: Session = Depends(get_session),
-    context: tuple[Tenant, User] = Depends(get_current_tenant_and_user),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+    _csrf: None = Depends(verify_csrf),
 ):
-    tenant, user = context
+    tenant, user, _ = session_info
     set_tenant(session, tenant.id)
 
     try:
@@ -260,9 +644,10 @@ def create_sale(
 async def bulk_sales(
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
-    context: tuple[Tenant, User] = Depends(get_current_tenant_and_user),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+    _csrf: None = Depends(verify_csrf),
 ):
-    tenant, user = context
+    tenant, user, _ = session_info
     set_tenant(session, tenant.id)
 
     validate_uploaded_file(file, ALLOWED_SALES_EXTENSIONS)
@@ -290,16 +675,17 @@ async def bulk_sales(
 
 
 # ---------------------------------------------------------------------------
-# Step 2: Statement Import & Auto-Matching Route
+# Step 2: Statement Import & Auto-Matching Route (Owner Only)
 # ---------------------------------------------------------------------------
 @router.post("/statements/upload")
 async def upload_statement(
     source_name: str = Form(...),
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
-    context: tuple[Tenant, User] = Depends(get_current_tenant_and_user),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+    _csrf: None = Depends(verify_csrf),
 ):
-    tenant, user = context
+    tenant, user = owner_context
     set_tenant(session, tenant.id)
 
     safe_filename = validate_uploaded_file(file, ALLOWED_STATEMENT_EXTENSIONS)
@@ -368,15 +754,16 @@ async def upload_statement(
 
 
 # ---------------------------------------------------------------------------
-# Step 3: Match Approval & Review Queue Action Routes
+# Step 3: Match Approval & Review Queue Action Routes (Owner Only)
 # ---------------------------------------------------------------------------
 @router.post("/matches/{match_id}/approve")
 def approve_match(
     match_id: str,
     session: Session = Depends(get_session),
-    context: tuple[Tenant, User] = Depends(get_current_tenant_and_user),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+    _csrf: None = Depends(verify_csrf),
 ):
-    tenant, user = context
+    tenant, user = owner_context
     set_tenant(session, tenant.id)
 
     try:
@@ -384,11 +771,27 @@ def approve_match(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid match ID")
 
-    pm = session.get(PaymentMatch, mid)
-    if not pm or pm.tenant_id != tenant.id:
+    # 1. Lock PaymentMatch in transaction (SEC-02)
+    pm = session.execute(
+        select(PaymentMatch)
+        .where(PaymentMatch.id == mid, PaymentMatch.tenant_id == tenant.id)
+        .with_for_update()
+    ).scalar_one_or_none()
+
+    if not pm:
         raise HTTPException(status_code=404, detail="Match not found")
 
-    pl = pm.payment_line
+    # Idempotency: if already confirmed, return success immediately
+    if pm.state == MatchState.CONFIRMED.value:
+        return HTMLResponse("<div class='p-3 text-xs font-bold text-emerald-800 bg-emerald-50 rounded-lg'>✓ Match Confirmed</div>")
+
+    # 2. Lock PaymentLine in consistent order (SEC-02)
+    pl = session.execute(
+        select(PaymentLine)
+        .where(PaymentLine.id == pm.payment_line_id, PaymentLine.tenant_id == tenant.id)
+        .with_for_update()
+    ).scalar_one()
+
     # Rule 2: Evidence Ladder Guard
     try:
         evidence = EvidenceLevel(pl.evidence_level)
@@ -396,20 +799,57 @@ def approve_match(
     except InsufficientEvidenceError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    # Check cumulative confirmed allocations on payment line
+    allocated_santim = session.execute(
+        select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
+        .where(
+            PaymentMatch.payment_line_id == pl.id,
+            PaymentMatch.state == MatchState.CONFIRMED.value,
+            PaymentMatch.id != pm.id,
+        )
+    ).scalar_one()
+
+    if allocated_santim + pm.matched_santim > pl.amount_santim:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Payment line is already confirmed or fully allocated ({allocated_santim}/{pl.amount_santim} santim).",
+        )
+
+    # 3. Lock Invoice in consistent order (SEC-02)
+    inv = session.execute(
+        select(Invoice)
+        .where(Invoice.id == pm.invoice_id, Invoice.tenant_id == tenant.id)
+        .with_for_update()
+    ).scalar_one()
+
+    inv_paid = session.execute(
+        select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
+        .where(
+            PaymentMatch.invoice_id == inv.id,
+            PaymentMatch.state == MatchState.CONFIRMED.value,
+            PaymentMatch.id != pm.id,
+        )
+    ).scalar_one()
+
+    if inv_paid >= inv.amount_santim:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Invoice {inv.invoice_number} is already fully settled ({inv_paid}/{inv.amount_santim} santim).",
+        )
+
     now = datetime.now(timezone.utc)
     pm.state = MatchState.CONFIRMED.value
     pm.confirmed_by = user.id
     pm.confirmed_at = now
-    pl.state = PaymentState.CONFIRMED.value
 
-    # Update invoice state if settled
-    inv = pm.invoice
-    confirmed_paid = session.execute(
-        select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
-        .where(PaymentMatch.invoice_id == inv.id, PaymentMatch.state == MatchState.CONFIRMED.value)
-    ).scalar_one()
+    if allocated_santim + pm.matched_santim >= pl.amount_santim:
+        pl.state = PaymentState.CONFIRMED.value
+    else:
+        pl.state = PaymentState.PARTIALLY_MATCHED.value
 
-    if confirmed_paid >= inv.amount_santim:
+    # Update invoice state
+    new_inv_paid = inv_paid + pm.matched_santim
+    if new_inv_paid >= inv.amount_santim:
         inv.state = InvoiceState.SETTLED.value
     else:
         inv.state = InvoiceState.PARTIALLY_PAID.value
@@ -422,16 +862,14 @@ def approve_match(
 def mark_unverified(
     match_id: str,
     session: Session = Depends(get_session),
-    context: tuple[Tenant, User] = Depends(get_current_tenant_and_user),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+    _csrf: None = Depends(verify_csrf),
 ):
     """
     Owner override for L4 items (Rule 2).
     Sets payment to accepted_unverified, which is NEVER counted as paid in any total or report.
     """
-    tenant, user = context
-    if user.role != UserRole.OWNER.value:
-        raise HTTPException(status_code=403, detail="Only owners can mark L4 items as accepted_unverified.")
-
+    tenant, user = owner_context
     set_tenant(session, tenant.id)
     try:
         pid = uuid.UUID(match_id)
@@ -462,9 +900,10 @@ def mark_unverified(
 def reject_match(
     match_id: str,
     session: Session = Depends(get_session),
-    context: tuple[Tenant, User] = Depends(get_current_tenant_and_user),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+    _csrf: None = Depends(verify_csrf),
 ):
-    tenant, user = context
+    tenant, user = owner_context
     set_tenant(session, tenant.id)
 
     try:
@@ -491,23 +930,23 @@ def reject_match(
 @router.get("/brief", response_class=PlainTextResponse)
 def morning_brief(
     session: Session = Depends(get_session),
-    context: tuple[Tenant, User] = Depends(get_current_tenant_and_user),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
 ):
-    tenant, _ = context
+    tenant, _, _ = session_info
     set_tenant(session, tenant.id)
     text_content = generate_morning_brief_text(session, tenant_id=tenant.id)
     return PlainTextResponse(text_content)
 
 
 # ---------------------------------------------------------------------------
-# Exports (Full Data & Accountant)
+# Exports (Full Data & Accountant) — Owner Only
 # ---------------------------------------------------------------------------
 @router.get("/exports/sales.csv")
 def download_sales_csv(
     session: Session = Depends(get_session),
-    context: tuple[Tenant, User] = Depends(get_current_tenant_and_user),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
 ):
-    tenant, _ = context
+    tenant, _ = owner_context
     set_tenant(session, tenant.id)
     content = export_sales_csv(session, tenant_id=tenant.id)
     return Response(
@@ -520,9 +959,9 @@ def download_sales_csv(
 @router.get("/exports/payments.csv")
 def download_payments_csv(
     session: Session = Depends(get_session),
-    context: tuple[Tenant, User] = Depends(get_current_tenant_and_user),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
 ):
-    tenant, _ = context
+    tenant, _ = owner_context
     set_tenant(session, tenant.id)
     content = export_payments_csv(session, tenant_id=tenant.id)
     return Response(
@@ -535,9 +974,9 @@ def download_payments_csv(
 @router.get("/exports/accountant.csv")
 def download_accountant_csv(
     session: Session = Depends(get_session),
-    context: tuple[Tenant, User] = Depends(get_current_tenant_and_user),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
 ):
-    tenant, _ = context
+    tenant, _ = owner_context
     set_tenant(session, tenant.id)
     content = export_accountant_csv(session, tenant_id=tenant.id)
     return Response(
@@ -554,9 +993,10 @@ def download_accountant_csv(
 def generate_confirmation_token_endpoint(
     retailer_id: str,
     session: Session = Depends(get_session),
-    context: tuple[Tenant, User] = Depends(get_current_tenant_and_user),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+    _csrf: None = Depends(verify_csrf),
 ):
-    tenant, user = context
+    tenant, user, _ = session_info
     set_tenant(session, tenant.id)
     try:
         rid = uuid.UUID(retailer_id)
@@ -582,13 +1022,28 @@ def generate_confirmation_token_endpoint(
 @router.get(
     "/confirm-balance/{raw_token}",
     response_class=HTMLResponse,
-    dependencies=[Depends(confirmation_rate_limiter)],
 )
 def view_balance_confirmation(
     request: Request,
     raw_token: str,
     session: Session = Depends(get_session),
 ):
+    """
+    Public retailer confirmation view.
+    Rate limited in PostgreSQL by client IP.
+    Strictly ignores any existing session cookies; tenant is resolved only from signed token.
+    """
+    client_ip = _get_client_ip(request)
+    try:
+        check_persistent_rate_limit(
+            session,
+            key=f"confirm:ip:{client_ip}",
+            max_requests=15,
+            window_seconds=60,
+        )
+    except RateLimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc))
+
     try:
         token_rec, retailer, invoices = validate_confirmation_token(session, raw_token=raw_token)
     except TokenError as exc:
@@ -615,7 +1070,6 @@ def view_balance_confirmation(
 @router.post(
     "/confirm-balance/{raw_token}/confirm",
     response_class=HTMLResponse,
-    dependencies=[Depends(confirmation_rate_limiter)],
 )
 def submit_balance_confirmation(
     request: Request,
@@ -625,6 +1079,22 @@ def submit_balance_confirmation(
     payment_date: str = Form(None),
     session: Session = Depends(get_session),
 ):
+    """
+    Public confirmation submission.
+    Rate limited in PostgreSQL by client IP.
+    Single-use token verification establishes tenant context.
+    """
+    client_ip = _get_client_ip(request)
+    try:
+        check_persistent_rate_limit(
+            session,
+            key=f"confirm:ip:{client_ip}",
+            max_requests=15,
+            window_seconds=60,
+        )
+    except RateLimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc))
+
     try:
         token_rec, retailer, _ = validate_confirmation_token(session, raw_token=raw_token)
     except TokenError as exc:
@@ -664,7 +1134,6 @@ def submit_balance_confirmation(
 @router.post(
     "/confirm-balance/{raw_token}/dispute",
     response_class=HTMLResponse,
-    dependencies=[Depends(confirmation_rate_limiter)],
 )
 def submit_balance_dispute(
     request: Request,
@@ -673,6 +1142,22 @@ def submit_balance_dispute(
     explanation: str = Form(...),
     session: Session = Depends(get_session),
 ):
+    """
+    Public dispute submission.
+    Rate limited in PostgreSQL by client IP.
+    Single-use token verification establishes tenant context.
+    """
+    client_ip = _get_client_ip(request)
+    try:
+        check_persistent_rate_limit(
+            session,
+            key=f"confirm:ip:{client_ip}",
+            max_requests=15,
+            window_seconds=60,
+        )
+    except RateLimitExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc))
+
     try:
         token_rec, retailer, _ = validate_confirmation_token(session, raw_token=raw_token)
     except TokenError as exc:

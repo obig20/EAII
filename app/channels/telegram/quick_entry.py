@@ -22,6 +22,7 @@ from app.importers.base import parse_amount_santim, parse_statement_date
 from app.kernel.models import Invoice, Retailer
 from app.kernel.money import Santim, validate_santim
 from app.kernel.sales import DuplicateInvoiceError, InvalidSaleError, record_credit_sale
+from app.kernel.tenant import set_tenant
 
 
 @dataclass
@@ -106,6 +107,7 @@ def process_quick_entry(
     Parse quick-entry string, find/create retailer, and record credit sale.
     Catches domain errors (duplicate invoice number, etc.) and returns structured result.
     """
+    set_tenant(session, tenant_id)
     today = base_date or datetime.now(timezone.utc).date()
 
     try:

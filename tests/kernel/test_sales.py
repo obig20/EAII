@@ -22,6 +22,7 @@ from app.kernel.sales import (
     parse_and_record_sales_csv,
     record_credit_sale,
 )
+from app.kernel.tenant import set_tenant
 
 
 @pytest.fixture
@@ -152,6 +153,7 @@ class TestRecordCreditSale:
         retailer_a: Retailer,
     ):
         # Create user and retailer for Tenant B
+        set_tenant(db_session, tenant_b.id)
         user_b = User(
             id=uuid.uuid4(),
             tenant_id=tenant_b.id,
@@ -172,6 +174,7 @@ class TestRecordCreditSale:
         due = date(2026, 11, 25)
 
         # Tenant A records INV-SHARED
+        set_tenant(db_session, tenant_a.id)
         inv_a, _ = record_credit_sale(
             db_session,
             tenant_id=tenant_a.id,
@@ -184,6 +187,7 @@ class TestRecordCreditSale:
         )
 
         # Tenant B records same INV-SHARED successfully
+        set_tenant(db_session, tenant_b.id)
         inv_b, _ = record_credit_sale(
             db_session,
             tenant_id=tenant_b.id,

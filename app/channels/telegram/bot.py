@@ -17,6 +17,7 @@ Architectural Invariant:
 
 from __future__ import annotations
 
+import hmac
 import io
 import re
 import uuid
@@ -188,7 +189,11 @@ async def handle_review(message: Message):
         if not user_info:
             await message.answer(t("ask_invite_code", lang))
             return
-        tenant, _ = user_info
+        tenant, user = user_info
+        if user.role != UserRole.OWNER.value:
+            await message.answer("Only owners can review proposed matches.")
+            return
+
         set_tenant(session, tenant.id)
 
         # Query proposed matches
@@ -236,6 +241,10 @@ async def handle_approve_callback(callback: CallbackQuery):
             await callback.answer(t("ask_invite_code", lang), show_alert=True)
             return
         tenant, user = user_info
+        if user.role != UserRole.OWNER.value:
+            await callback.answer("Only owners can approve payment matches.", show_alert=True)
+            return
+
         set_tenant(session, tenant.id)
 
         try:
@@ -244,18 +253,57 @@ async def handle_approve_callback(callback: CallbackQuery):
             await callback.answer("Invalid match ID", show_alert=True)
             return
 
-        pm = session.get(PaymentMatch, mid)
-        if not pm or pm.tenant_id != tenant.id:
+        # 1. Lock PaymentMatch in transaction (SEC-02 consistent lock order: match -> line -> invoice)
+        pm = session.execute(
+            select(PaymentMatch)
+            .where(PaymentMatch.id == mid, PaymentMatch.tenant_id == tenant.id)
+            .with_for_update()
+        ).scalar_one_or_none()
+
+        if not pm:
             await callback.answer("Match not found", show_alert=True)
             return
 
-        pl = pm.payment_line
+        # Idempotency
+        if pm.state == MatchState.CONFIRMED.value:
+            await callback.answer("Already confirmed!", show_alert=True)
+            return
+
+        # 2. Lock PaymentLine in consistent order (SEC-02)
+        pl = session.execute(
+            select(PaymentLine)
+            .where(PaymentLine.id == pm.payment_line_id, PaymentLine.tenant_id == tenant.id)
+            .with_for_update()
+        ).scalar_one()
+
         # NON-NEGOTIABLE RULE 2: L4 Evidence cannot confirm!
         try:
             assert_confirmable(EvidenceLevel(pl.evidence_level))
         except InsufficientEvidenceError:
             await callback.answer(t("l4_cannot_confirm", lang), show_alert=True)
             return
+
+        # Check payment allocations
+        from sqlalchemy import func
+        allocated_santim = session.execute(
+            select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
+            .where(
+                PaymentMatch.payment_line_id == pl.id,
+                PaymentMatch.state == MatchState.CONFIRMED.value,
+                PaymentMatch.id != pm.id,
+            )
+        ).scalar_one()
+
+        if allocated_santim + pm.matched_santim > pl.amount_santim:
+            await callback.answer("Payment line already confirmed or fully allocated.", show_alert=True)
+            return
+
+        # 3. Lock Invoice in consistent order (SEC-02)
+        inv = session.execute(
+            select(Invoice)
+            .where(Invoice.id == pm.invoice_id, Invoice.tenant_id == tenant.id)
+            .with_for_update()
+        ).scalar_one()
 
         now = datetime.now(timezone.utc)
         pm.state = MatchState.CONFIRMED.value
@@ -264,8 +312,6 @@ async def handle_approve_callback(callback: CallbackQuery):
         pl.state = PaymentState.CONFIRMED.value
 
         # Settle invoice if completed
-        inv = pm.invoice
-        from sqlalchemy import func
         paid = session.execute(
             select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
             .where(PaymentMatch.invoice_id == inv.id, PaymentMatch.state == MatchState.CONFIRMED.value)
@@ -349,6 +395,10 @@ async def handle_reject_callback(callback: CallbackQuery):
             await callback.answer(t("ask_invite_code", lang), show_alert=True)
             return
         tenant, user = user_info
+        if user.role != UserRole.OWNER.value:
+            await callback.answer("Only owners can reject payment matches.", show_alert=True)
+            return
+
         set_tenant(session, tenant.id)
 
         try:
@@ -521,3 +571,13 @@ def create_telegram_bot(token: str) -> tuple[Bot, Dispatcher]:
     dp = Dispatcher()
     dp.include_router(router)
     return bot, dp
+
+
+def verify_telegram_webhook_secret(secret_header: str | None, expected_secret: str) -> bool:
+    """Verify Telegram webhook X-Telegram-Bot-Api-Secret-Token header."""
+    if not expected_secret:
+        return True
+    if not secret_header:
+        return False
+    return hmac.compare_digest(secret_header.strip(), expected_secret.strip())
+

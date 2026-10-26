@@ -28,12 +28,24 @@ class Settings(BaseSettings):
 
     # Secret key for signing tokens (min 32 chars)
     secret_key: str
+    auth_log_key: str = "default-insecure-auth-log-key-32-chars-minimum!"
 
     # Logging
     log_level: str = "INFO"
 
+    # Environment
+    app_env: str = "development"
+
     # Testing flag (set to "true" in test environments)
     testing: bool = False
+
+    # Session & Auth Settings
+    session_idle_timeout_minutes: int = 60
+    session_lifetime_hours: int = 12
+    session_cookie_secure: bool = False
+
+    # Telegram Webhook Secret
+    telegram_webhook_secret: str = ""
 
     @field_validator("secret_key")
     @classmethod

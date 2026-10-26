@@ -39,10 +39,54 @@ BUSINESS_SUFFIXES = {
     "exporter",
     "wholesaler",
     "distributor",
+    "pharmacy",
+    "electronics",
+    "mini",
+    "market",
+    "boutique",
+    "supermarket",
+    "stationery",
+    "cosmetics",
+    "goods",
+    "provisions",
+    "bakery",
+    "bookshop",
+    "grocery",
+    "depot",
+    "commodity",
     "ንግድ",
     "ሱቅ",
+    "ጅምላ",
+    "ፋርማሲ",
+    "ኤሌክትሮኒክስ",
     "ኃ/የተ/የግ/ማ",
     "የግል",
+}
+
+FIDEL_TO_LATIN = {
+    # First names
+    "አበበ": "abebe", "አልማዝ": "almaz", "ጭሎት": "chilot", "ዳዊት": "dawit",
+    "ኤፍሬም": "ephrem", "ፍቅሩ": "fikru", "ግርማ": "girma", "ኃይሌ": "haile",
+    "ካሳሁን": "kassahun", "ሙሉጌታ": "mulugeta", "ነፃነት": "netsanet",
+    "ሰላማዊት": "selamawit", "ታደሰ": "tadesse", "ወርቁ": "worku",
+    "ዮሐንስ": "yohannes", "ዘውዱ": "zewdu",
+    # Last names / patronymics
+    "በቀለ": "bekele", "አሰፋ": "assefa", "ከበደ": "kebede", "ጥላሁን": "tilahun",
+    "መንግስቱ": "mengistu", "ተስፋዬ": "tesfaye", "አለሙ": "alemu", "ደሚሴ": "demissie",
+    # Store types
+    "ሱቅ": "shop", "ጅምላ": "wholesale", "ሚኒ": "mini", "ማርኬት": "market",
+    "ፋርማሲ": "pharmacy", "ኤሌክትሮኒክስ": "electronics", "ንግድ": "trading",
+}
+
+ALIAS_MAP = {
+    "ababa": "abebe", "abebech": "abebe", "abe": "abebe",
+    "elmaz": "almaz", "chilote": "chilot", "david": "dawit", "davit": "dawit",
+    "efrem": "ephrem", "ephraim": "ephrem", "fekru": "fikru", "fikre": "fikru",
+    "germa": "girma", "grm": "girma", "hayle": "haile", "hailemariam": "haile",
+    "kassa": "kassahun", "kassu": "kassahun", "mulu": "mulugeta", "mulu-geta": "mulugeta",
+    "nesanet": "netsanet", "netsi": "netsanet", "selam": "selamawit",
+    "taddese": "tadesse", "tad": "tadesse", "werku": "worku", "workneh": "worku",
+    "john": "yohannes", "yohanes": "yohannes", "zewdie": "zewdu",
 }
 
 
@@ -100,11 +144,16 @@ def normalize_ethiopian_name(name: str | None) -> str:
     # Unicode normalization
     s = unicodedata.normalize("NFKD", name).lower()
 
+    # Transliterate Amharic / Ge'ez Fidel script to Latin
+    for fid, lat in FIDEL_TO_LATIN.items():
+        s = s.replace(fid, lat)
+
     # Remove non-alphanumeric except spaces
     s = re.sub(r"[^\w\s]", " ", s)
 
-    # First strip business suffixes BEFORE character substitutions
-    tokens = [t for t in s.split() if t not in BUSINESS_SUFFIXES and len(t) > 1]
+    # First strip business suffixes and map known aliases BEFORE character substitutions
+    tokens = [ALIAS_MAP.get(t, t) for t in s.split()]
+    tokens = [t for t in tokens if t not in BUSINESS_SUFFIXES and len(t) > 1]
     s = " ".join(tokens) if tokens else s
 
     # Phonetic and transliteration normalizations

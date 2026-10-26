@@ -19,6 +19,7 @@ from typing import Sequence
 from app.kernel.enums import (
     CONFIRMABLE_EVIDENCE_LEVELS,
     EvidenceLevel,
+    InvoiceState,
     MatchState,
     MatchTier,
     PaymentState,
@@ -95,12 +96,16 @@ def _find_subset_sum(
 ) -> list[Invoice] | None:
     """
     Deterministic subset sum to find if 2 or 3 invoices exactly equal target payment.
-    Used for proposing combined payments.
+    Used for proposing combined payments. Prunes invoices >= target_santim for performance.
     """
+    valid_invoices = [inv for inv in invoices if 0 < inv.amount_santim < target_santim]
+    if len(valid_invoices) < 2:
+        return None
+
     from itertools import combinations
 
-    for r in range(2, min(len(invoices) + 1, max_items + 1)):
-        for combo in combinations(invoices, r):
+    for r in range(2, min(len(valid_invoices) + 1, max_items + 1)):
+        for combo in combinations(valid_invoices, r):
             if sum(inv.amount_santim for inv in combo) == target_santim:
                 return list(combo)
     return None
@@ -133,6 +138,37 @@ class PaymentMatcher:
             inv for inv in open_invoices if inv.state in ("open", "partially_paid")
         ]
 
+        ref_text = f"{payment.raw_reference or ''} {payment.source_ref or ''}".strip()
+
+        # Check if reference specifically matches an already-settled invoice (duplicate/overpayment)
+        settled_invoices = [
+            inv for inv in open_invoices if inv.state in ("paid", "settled")
+        ]
+        if ref_text and settled_invoices:
+            matched_settled = []
+            for inv in settled_invoices:
+                inv_clean = inv.invoice_number.upper().strip()
+                escaped_num = re.escape(inv_clean)
+                pattern = rf"\b{escaped_num}\b"
+                if re.search(pattern, ref_text, re.IGNORECASE):
+                    matched_settled.append(inv)
+            if matched_settled:
+                target_inv = matched_settled[0]
+                return MatchResult(
+                    payment_line_id=payment.id,
+                    status="proposed",
+                    tier=MatchTier.TIER_A,
+                    matches=[
+                        MatchItem(
+                            invoice_id=target_inv.id,
+                            matched_santim=payment.amount_santim,
+                        )
+                    ],
+                    confidence_score=0.75,
+                    reason=f"Possible duplicate payment or overpayment for settled invoice {target_inv.invoice_number}",
+                    evidence_level=evidence,
+                )
+
         if not active_invoices:
             return MatchResult(
                 payment_line_id=payment.id,
@@ -144,36 +180,33 @@ class PaymentMatcher:
         # ------------------------------------------------------------------
         # TIER A: Invoice number in payment reference & amount checks
         # ------------------------------------------------------------------
-        ref_text = f"{payment.raw_reference or ''} {payment.source_ref or ''}".strip()
         if ref_text:
-            extracted_tokens = _extract_invoice_tokens(ref_text)
+            # Extract all distinct invoice-like tokens in ref_text
+            raw_invoice_patterns = list(re.finditer(r"\b(?:INV|INVOICE)[-_\s#]*([A-Z0-9]+)\b", ref_text, re.IGNORECASE))
+            distinct_tokens_in_ref = {m.group(1).upper().strip() for m in raw_invoice_patterns}
+            is_compound_ref = len(distinct_tokens_in_ref) > 1
 
             matched_invoices: list[Invoice] = []
             for inv in active_invoices:
                 inv_num_clean = inv.invoice_number.upper().strip()
-                inv_digits = re.sub(r"\D", "", inv_num_clean)
+                escaped_num = re.escape(inv_num_clean)
+                pattern = rf"\b{escaped_num}\b"
 
-                # Check if invoice number or its tokens appear in reference
-                found = False
-                if inv_num_clean in ref_text.upper():
-                    found = True
-                elif any(token == inv_num_clean for token in extracted_tokens):
-                    found = True
-                elif inv_digits and len(inv_digits) >= 3 and inv_digits in extracted_tokens:
-                    found = True
+                inv_digits = re.sub(r"^INV[-_\s#]*", "", inv_num_clean)
+                alt_pattern = rf"\b(?:INV|INVOICE)[-_\s#]*{re.escape(inv_digits)}\b"
 
-                if found:
+                if re.search(pattern, ref_text, re.IGNORECASE) or re.search(alt_pattern, ref_text, re.IGNORECASE):
                     matched_invoices.append(inv)
 
             if matched_invoices:
-                # Rule 3: Check for ambiguity (multiple different invoices matched reference)
                 exact_amount_matches = [
                     inv for inv in matched_invoices if inv.amount_santim == payment.amount_santim
                 ]
 
-                if len(exact_amount_matches) == 1:
+                # SEC-11: Auto-confirm ONLY for Tier A exact token match with word boundaries,
+                # equal amount, and exactly ONE invoice token in reference.
+                if len(exact_amount_matches) == 1 and not is_compound_ref and len(matched_invoices) == 1:
                     target_inv = exact_amount_matches[0]
-                    # Exactly one invoice matches reference and amount
                     can_auto = evidence in CONFIRMABLE_EVIDENCE_LEVELS
                     return MatchResult(
                         payment_line_id=payment.id,
@@ -189,8 +222,25 @@ class PaymentMatcher:
                         reason=f"Tier A exact match: {target_inv.invoice_number} in reference with equal amount",
                         evidence_level=evidence,
                     )
+                elif len(exact_amount_matches) == 1:
+                    # Compound reference or multiple candidate matches -> Review Queue proposal
+                    target_inv = exact_amount_matches[0]
+                    return MatchResult(
+                        payment_line_id=payment.id,
+                        status="proposed",
+                        tier=MatchTier.TIER_A,
+                        matches=[
+                            MatchItem(
+                                invoice_id=target_inv.id,
+                                matched_santim=payment.amount_santim,
+                            )
+                        ],
+                        confidence_score=0.85,
+                        reason=f"Tier A compound reference proposal for {target_inv.invoice_number}",
+                        evidence_level=evidence,
+                    )
                 elif len(exact_amount_matches) > 1:
-                    # Rule 3: Send to review queue
+                    # Ambiguous: send to review queue
                     return MatchResult(
                         payment_line_id=payment.id,
                         status="proposed",
@@ -206,9 +256,7 @@ class PaymentMatcher:
                     )
                 elif len(matched_invoices) == 1:
                     target_inv = matched_invoices[0]
-                    # Check partial payment (amount < invoice amount)
                     if payment.amount_santim < target_inv.amount_santim:
-                        # Partial payments are only PROPOSED for owner approval
                         return MatchResult(
                             payment_line_id=payment.id,
                             status="proposed",
@@ -224,9 +272,61 @@ class PaymentMatcher:
                             reason=f"Proposed partial payment for {target_inv.invoice_number}",
                             evidence_level=evidence,
                         )
+                elif len(matched_invoices) > 1:
+                    combo = _find_subset_sum(matched_invoices, payment.amount_santim, max_items=len(matched_invoices))
+                    target_invoices = combo if combo else matched_invoices[:3]
+                    return MatchResult(
+                        payment_line_id=payment.id,
+                        status="proposed",
+                        tier=MatchTier.TIER_A,
+                        matches=[
+                            MatchItem(
+                                invoice_id=inv.id,
+                                matched_santim=min(payment.amount_santim, inv.amount_santim),
+                                is_combined=len(target_invoices) > 1,
+                            )
+                            for inv in target_invoices
+                        ],
+                        is_ambiguous=(not bool(combo)),
+                        confidence_score=0.92 if combo else 0.80,
+                        reason=f"Tier A compound reference for invoices: {', '.join(inv.invoice_number for inv in target_invoices)}",
+                        evidence_level=evidence,
+                    )
+            else:
+                # Delimiter and OCR typo matching (0/O substitutions, missing hyphens)
+                clean_ref = re.sub(r"[-\s_#]+", "", ref_text.upper())
+                clean_ref_0 = clean_ref.replace("O", "0")
+                ocr_matches = []
+                for inv in active_invoices:
+                    norm_inv = re.sub(r"[-\s_#]+", "", inv.invoice_number.upper().strip())
+                    norm_inv_0 = norm_inv.replace("O", "0")
+                    if (norm_inv in clean_ref or norm_inv_0 in clean_ref_0) and len(norm_inv) >= 4:
+                        ocr_matches.append(inv)
+                if ocr_matches:
+                    combo = _find_subset_sum(ocr_matches, payment.amount_santim, max_items=len(ocr_matches))
+                    target_invoices = combo if combo else ocr_matches[:3]
+                    return MatchResult(
+                        payment_line_id=payment.id,
+                        status="proposed",
+                        tier=MatchTier.TIER_A,
+                        matches=[
+                            MatchItem(
+                                invoice_id=inv.id,
+                                matched_santim=min(payment.amount_santim, inv.amount_santim),
+                                is_combined=len(target_invoices) > 1,
+                                is_partial=payment.amount_santim < inv.amount_santim,
+                            )
+                            for inv in target_invoices
+                        ],
+                        is_ambiguous=(len(ocr_matches) > 1 and not bool(combo)),
+                        confidence_score=0.88,
+                        reason=f"Tier A OCR reference match for {len(target_invoices)} invoice(s)",
+                        evidence_level=evidence,
+                    )
 
         # ------------------------------------------------------------------
         # TIER B: Counterparty phone or account + amount + date window
+        # (SEC-11: Tier B is NEVER auto-confirmed; always routed to review queue)
         # ------------------------------------------------------------------
         norm_cp_phone = normalize_phone(payment.counterparty_account) or normalize_phone(
             payment.counterparty_name
@@ -246,7 +346,6 @@ class PaymentMatcher:
             ret = matched_retailers[0]
             ret_invoices = [inv for inv in active_invoices if inv.retailer_id == ret.id]
 
-            # Filter by exact amount and date window
             date_window = self.config.date_window_days
             equal_amount_invoices = [
                 inv
@@ -257,10 +356,9 @@ class PaymentMatcher:
 
             if len(equal_amount_invoices) == 1:
                 target_inv = equal_amount_invoices[0]
-                can_auto = evidence in CONFIRMABLE_EVIDENCE_LEVELS
                 return MatchResult(
                     payment_line_id=payment.id,
-                    status="auto_confirmed" if can_auto else "proposed",
+                    status="proposed",
                     tier=MatchTier.TIER_B,
                     matches=[
                         MatchItem(
@@ -268,50 +366,35 @@ class PaymentMatcher:
                             matched_santim=payment.amount_santim,
                         )
                     ],
-                    confidence_score=0.95,
-                    reason=f"Tier B counterparty match for {ret.name}: invoice {target_inv.invoice_number} within date window",
+                    confidence_score=0.90,
+                    reason=f"Tier B counterparty match for {ret.name}: invoice {target_inv.invoice_number} proposed for review",
                     evidence_level=evidence,
                 )
             elif len(equal_amount_invoices) > 1:
-                # Disambiguate if one invoice is on the payment date and the other is a distant billing cycle
                 sorted_by_date = sorted(
                     equal_amount_invoices,
-                    key=lambda inv: abs((payment.value_date - inv.due_date).days),
+                    key=lambda inv: min(
+                        abs((payment.value_date - inv.issued_date).days),
+                        abs((payment.value_date - inv.due_date).days),
+                    ),
                 )
-                dist0 = abs((payment.value_date - sorted_by_date[0].due_date).days)
-                dist1 = abs((payment.value_date - sorted_by_date[1].due_date).days)
-
-                if dist0 <= 12 and (dist1 - dist0) >= 12 and evidence in CONFIRMABLE_EVIDENCE_LEVELS:
-                    target_inv = sorted_by_date[0]
-                    return MatchResult(
-                        payment_line_id=payment.id,
-                        status="auto_confirmed",
-                        tier=MatchTier.TIER_B,
-                        matches=[
-                            MatchItem(
-                                invoice_id=target_inv.id,
-                                matched_santim=payment.amount_santim,
-                            )
-                        ],
-                        confidence_score=0.92,
-                        reason=f"Tier B primary cycle match for {ret.name}: invoice {target_inv.invoice_number}",
-                        evidence_level=evidence,
-                    )
-                else:
-                    # Same-amount collision: multiple equally plausible invoices -> Review Queue!
-                    return MatchResult(
-                        payment_line_id=payment.id,
-                        status="proposed",
-                        tier=MatchTier.TIER_B,
-                        matches=[
-                            MatchItem(invoice_id=inv.id, matched_santim=payment.amount_santim)
-                            for inv in equal_amount_invoices
-                        ],
-                        is_ambiguous=True,
-                        confidence_score=0.60,
-                        reason=f"Ambiguous: Retailer {ret.name} has {len(equal_amount_invoices)} invoices with identical amounts in date window",
-                        evidence_level=evidence,
-                    )
+                target_inv = sorted_by_date[0]
+                return MatchResult(
+                    payment_line_id=payment.id,
+                    status="proposed",
+                    tier=MatchTier.TIER_B,
+                    matches=[
+                        MatchItem(
+                            invoice_id=inv.id,
+                            matched_santim=payment.amount_santim,
+                        )
+                        for inv in sorted_by_date[:3]
+                    ],
+                    is_ambiguous=True,
+                    confidence_score=0.85,
+                    reason=f"Tier B ambiguous amount collision for {ret.name}: invoice {target_inv.invoice_number}",
+                    evidence_level=evidence,
+                )
 
             # Check combined payment (single payment covering 2-3 invoices)
             combined_combo = _find_subset_sum(ret_invoices, payment.amount_santim, max_items=3)
@@ -388,14 +471,10 @@ class PaymentMatcher:
 
                     if len(ret_invoices) == 1:
                         target_inv = ret_invoices[0]
-                        # Can auto-confirm only if ultra-high confidence AND confirmable evidence
-                        can_auto = (
-                            top_score >= self.config.fuzzy_auto_confirm_threshold
-                            and evidence in CONFIRMABLE_EVIDENCE_LEVELS
-                        )
+                        # SEC-11: Tier C fuzzy matches are NEVER auto-confirmed; always proposed for review queue
                         return MatchResult(
                             payment_line_id=payment.id,
-                            status="auto_confirmed" if can_auto else "proposed",
+                            status="proposed",
                             tier=MatchTier.TIER_C,
                             matches=[
                                 MatchItem(
@@ -447,6 +526,37 @@ class PaymentMatcher:
                             )
 
         # ------------------------------------------------------------------
+        # AMOUNT FALLBACK: Open invoices matching amount within date window
+        # (RULE 3: Multiple plausible invoices -> Review Queue proposed ONLY)
+        # ------------------------------------------------------------------
+        amt_invoices = [
+            inv for inv in active_invoices
+            if inv.amount_santim == payment.amount_santim
+            and abs((payment.value_date - inv.due_date).days) <= self.config.date_window_days
+        ]
+        if amt_invoices:
+            sorted_amt = sorted(
+                amt_invoices,
+                key=lambda i: min(
+                    abs((payment.value_date - i.issued_date).days),
+                    abs((payment.value_date - i.due_date).days),
+                ),
+            )
+            return MatchResult(
+                payment_line_id=payment.id,
+                status="proposed",
+                tier=MatchTier.TIER_C,
+                matches=[
+                    MatchItem(invoice_id=i.id, matched_santim=payment.amount_santim)
+                    for i in sorted_amt[:3]
+                ],
+                is_ambiguous=(len(amt_invoices) > 1),
+                confidence_score=0.60,
+                reason=f"Proposed amount match for {len(amt_invoices)} invoice(s)",
+                evidence_level=evidence,
+            )
+
+        # ------------------------------------------------------------------
         # UNMATCHED
         # ------------------------------------------------------------------
         return MatchResult(
@@ -496,6 +606,23 @@ class PaymentMatcher:
                 )
                 session.add(pm)
                 matches_created.append(pm)
+
+                # Update invoice state upon auto-confirmation
+                from sqlalchemy import func, select
+                inv = session.get(Invoice, m.invoice_id)
+                if inv:
+                    inv_paid = session.execute(
+                        select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
+                        .where(
+                            PaymentMatch.invoice_id == inv.id,
+                            PaymentMatch.state == MatchState.CONFIRMED.value,
+                            PaymentMatch.id != pm.id,
+                        )
+                    ).scalar_one() + m.matched_santim
+                    if inv_paid >= inv.amount_santim:
+                        inv.state = InvoiceState.SETTLED.value
+                    else:
+                        inv.state = InvoiceState.PARTIALLY_PAID.value
 
                 # Append event
                 append_event(

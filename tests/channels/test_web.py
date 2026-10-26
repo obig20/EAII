@@ -29,6 +29,7 @@ from app.kernel.enums import EvidenceLevel, InvoiceState, MatchState, PaymentSta
 from app.kernel.models import ImportBatch, Invoice, PaymentLine, PaymentMatch, Retailer, Tenant, User
 from app.kernel.tenant import set_tenant
 from app.main import app
+from tests.conftest import authenticate_client
 
 
 @pytest.fixture
@@ -47,6 +48,7 @@ def web_tenant(db_session: Session) -> Tenant:
     t = Tenant(id=uuid.uuid4(), name="Web Test Tenant", created_at=datetime.now(timezone.utc))
     db_session.add(t)
     db_session.flush()
+    set_tenant(db_session, t.id)
     return t
 
 
@@ -96,11 +98,12 @@ class TestWebDashboard:
     def test_dashboard_renders(
         self,
         client: TestClient,
+        db_session: Session,
         web_tenant: Tenant,
         web_owner: User,
     ):
-        headers = {"x-tenant-id": str(web_tenant.id), "x-user-role": "owner"}
-        response = client.get("/", headers=headers)
+        authenticate_client(client, db_session, web_owner)
+        response = client.get("/")
         assert response.status_code == 200
         html = response.text
         assert "Daily Close" in html
@@ -119,14 +122,14 @@ class TestWebCreditSales:
         web_owner: User,
         web_retailer: Retailer,
     ):
-        headers = {"x-tenant-id": str(web_tenant.id), "x-user-role": "owner"}
+        authenticate_client(client, db_session, web_owner)
         data = {
             "invoice_number": "INV-WEB-001",
             "retailer_id": str(web_retailer.id),
             "amount_etb": "1500.50",
             "due_date": "2026-11-30",
         }
-        response = client.post("/sales", data=data, headers=headers, follow_redirects=False)
+        response = client.post("/sales", data=data, follow_redirects=False)
         assert response.status_code == 303
         assert "msg=" in response.headers["location"]
 
@@ -143,33 +146,35 @@ class TestWebCreditSales:
     def test_create_credit_sale_rejects_duplicate(
         self,
         client: TestClient,
+        db_session: Session,
         web_tenant: Tenant,
         web_owner: User,
         web_retailer: Retailer,
     ):
-        headers = {"x-tenant-id": str(web_tenant.id), "x-user-role": "owner"}
+        authenticate_client(client, db_session, web_owner)
         data = {
             "invoice_number": "INV-DUP-WEB",
             "retailer_id": str(web_retailer.id),
             "amount_etb": "2000.00",
             "due_date": "2026-11-30",
         }
-        res1 = client.post("/sales", data=data, headers=headers)
+        res1 = client.post("/sales", data=data)
         assert res1.status_code == 200 or res1.status_code == 303
 
         # Post duplicate invoice number
-        res2 = client.post("/sales", data=data, headers=headers)
+        res2 = client.post("/sales", data=data)
         assert res2.status_code == 400
         assert "already exists" in res2.json()["detail"]
 
     def test_create_credit_sale_invalid_parameters(
         self,
         client: TestClient,
+        db_session: Session,
         web_tenant: Tenant,
         web_owner: User,
         web_retailer: Retailer,
     ):
-        headers = {"x-tenant-id": str(web_tenant.id), "x-user-role": "owner"}
+        authenticate_client(client, db_session, web_owner)
         # Invalid amount
         data_bad_amt = {
             "invoice_number": "INV-BAD-AMT",
@@ -177,7 +182,7 @@ class TestWebCreditSales:
             "amount_etb": "-500.00",
             "due_date": "2026-11-30",
         }
-        res = client.post("/sales", data=data_bad_amt, headers=headers)
+        res = client.post("/sales", data=data_bad_amt)
         assert res.status_code == 400
 
     def test_bulk_sales_csv_upload(
@@ -187,14 +192,14 @@ class TestWebCreditSales:
         web_tenant: Tenant,
         web_owner: User,
     ):
-        headers = {"x-tenant-id": str(web_tenant.id), "x-user-role": "owner"}
+        authenticate_client(client, db_session, web_owner)
         csv_content = (
             "Invoice Number,Retailer Name,Amount,Issue Date,Due Date,Phone\n"
             "INV-BULK-1,Bulker One,4000.00,2026-10-01,2026-10-31,+251911999888\n"
             "INV-BULK-2,Bulker Two,6500.00,2026-10-02,2026-11-01,+251911777666\n"
         )
         files = {"file": ("bulk_sales.csv", csv_content.encode("utf-8"), "text/csv")}
-        response = client.post("/sales/bulk", files=files, headers=headers, follow_redirects=False)
+        response = client.post("/sales/bulk", files=files, follow_redirects=False)
         assert response.status_code == 303
 
         invoices = db_session.execute(
@@ -215,7 +220,7 @@ class TestWebStatementsAndMatching:
         web_owner: User,
         web_retailer: Retailer,
     ):
-        headers = {"x-tenant-id": str(web_tenant.id), "x-user-role": "owner"}
+        authenticate_client(client, db_session, web_owner)
 
         # Seed an invoice to match
         now = datetime.now(timezone.utc)
@@ -242,7 +247,7 @@ class TestWebStatementsAndMatching:
         files = {"file": ("cbe_statement.csv", csv_stmt.encode("utf-8"), "text/csv")}
         data = {"source_name": "cbe_csv"}
 
-        response = client.post("/statements/upload", data=data, files=files, headers=headers, follow_redirects=False)
+        response = client.post("/statements/upload", data=data, files=files, follow_redirects=False)
         assert response.status_code == 303
 
         # Verify payment line created and auto-matched (Tier A)
@@ -266,7 +271,7 @@ class TestWebMatchApprovalsAndGuards:
         web_owner: User,
         web_retailer: Retailer,
     ):
-        headers = {"x-tenant-id": str(web_tenant.id), "x-user-role": "owner"}
+        authenticate_client(client, db_session, web_owner)
         now = datetime.now(timezone.utc)
 
         inv = Invoice(
@@ -314,7 +319,7 @@ class TestWebMatchApprovalsAndGuards:
         db_session.flush()
 
         # Approve L2 match
-        res = client.post(f"/matches/{pm.id}/approve", headers=headers)
+        res = client.post(f"/matches/{pm.id}/approve")
         assert res.status_code == 200
         assert "Match Confirmed" in res.text
 
@@ -337,7 +342,7 @@ class TestWebMatchApprovalsAndGuards:
         L4 evidence (screenshot, SMS, manual note) can NEVER be confirmed!
         Attempting to approve an L4 match must return 400 Bad Request.
         """
-        headers = {"x-tenant-id": str(web_tenant.id), "x-user-role": "owner"}
+        authenticate_client(client, db_session, web_owner)
         now = datetime.now(timezone.utc)
 
         inv = Invoice(
@@ -384,7 +389,7 @@ class TestWebMatchApprovalsAndGuards:
         db_session.add_all([inv, batch, pl, pm])
         db_session.flush()
 
-        res = client.post(f"/matches/{pm.id}/approve", headers=headers)
+        res = client.post(f"/matches/{pm.id}/approve")
         assert res.status_code == 400
         assert "cannot set a payment to 'confirmed'" in res.json()["detail"].lower()
 
@@ -401,7 +406,7 @@ class TestWebMatchApprovalsAndGuards:
         web_tenant: Tenant,
         web_owner: User,
     ):
-        headers = {"x-tenant-id": str(web_tenant.id), "x-user-role": "owner"}
+        authenticate_client(client, db_session, web_owner)
         now = datetime.now(timezone.utc)
 
         batch = ImportBatch(
@@ -426,7 +431,7 @@ class TestWebMatchApprovalsAndGuards:
         db_session.add_all([batch, pl])
         db_session.flush()
 
-        res = client.post(f"/matches/{pl.id}/mark-unverified", headers=headers)
+        res = client.post(f"/matches/{pl.id}/mark-unverified")
         assert res.status_code == 200
         assert "Accepted Unverified" in res.text
 
@@ -440,7 +445,7 @@ class TestWebMatchApprovalsAndGuards:
         web_tenant: Tenant,
         web_cashier: User,
     ):
-        headers = {"x-tenant-id": str(web_tenant.id), "x-user-role": "cashier"}
+        authenticate_client(client, db_session, web_cashier)
         now = datetime.now(timezone.utc)
 
         batch = ImportBatch(
@@ -465,9 +470,9 @@ class TestWebMatchApprovalsAndGuards:
         db_session.add_all([batch, pl])
         db_session.flush()
 
-        res = client.post(f"/matches/{pl.id}/mark-unverified", headers=headers)
+        res = client.post(f"/matches/{pl.id}/mark-unverified")
         assert res.status_code == 403
-        assert "Only owners can mark L4 items as accepted_unverified" in res.json()["detail"]
+        assert "Owner role required" in res.json()["detail"]
 
     def test_reject_match(
         self,
@@ -477,7 +482,7 @@ class TestWebMatchApprovalsAndGuards:
         web_owner: User,
         web_retailer: Retailer,
     ):
-        headers = {"x-tenant-id": str(web_tenant.id), "x-user-role": "owner"}
+        authenticate_client(client, db_session, web_owner)
         now = datetime.now(timezone.utc)
 
         inv = Invoice(
@@ -524,7 +529,7 @@ class TestWebMatchApprovalsAndGuards:
         db_session.add_all([inv, batch, pl, pm])
         db_session.flush()
 
-        res = client.post(f"/matches/{pm.id}/reject", headers=headers)
+        res = client.post(f"/matches/{pm.id}/reject")
         assert res.status_code == 200
         assert "Match Rejected" in res.text
 
@@ -538,11 +543,12 @@ class TestWebReportsAndExports:
     def test_morning_brief_endpoint(
         self,
         client: TestClient,
+        db_session: Session,
         web_tenant: Tenant,
         web_owner: User,
     ):
-        headers = {"x-tenant-id": str(web_tenant.id), "x-user-role": "owner"}
-        res = client.get("/brief", headers=headers)
+        authenticate_client(client, db_session, web_owner)
+        res = client.get("/brief")
         assert res.status_code == 200
         assert "text/plain" in res.headers["content-type"]
         assert "DAILY CLOSE — MORNING COLLECTIONS BRIEF" in res.text
@@ -550,11 +556,12 @@ class TestWebReportsAndExports:
     def test_download_sales_csv(
         self,
         client: TestClient,
+        db_session: Session,
         web_tenant: Tenant,
         web_owner: User,
     ):
-        headers = {"x-tenant-id": str(web_tenant.id), "x-user-role": "owner"}
-        res = client.get("/exports/sales.csv", headers=headers)
+        authenticate_client(client, db_session, web_owner)
+        res = client.get("/exports/sales.csv")
         assert res.status_code == 200
         assert "text/csv" in res.headers["content-type"]
         assert "Invoice Number" in res.text
@@ -562,11 +569,12 @@ class TestWebReportsAndExports:
     def test_download_payments_csv(
         self,
         client: TestClient,
+        db_session: Session,
         web_tenant: Tenant,
         web_owner: User,
     ):
-        headers = {"x-tenant-id": str(web_tenant.id), "x-user-role": "owner"}
-        res = client.get("/exports/payments.csv", headers=headers)
+        authenticate_client(client, db_session, web_owner)
+        res = client.get("/exports/payments.csv")
         assert res.status_code == 200
         assert "text/csv" in res.headers["content-type"]
         assert "Payment ID" in res.text
@@ -574,11 +582,12 @@ class TestWebReportsAndExports:
     def test_download_accountant_csv(
         self,
         client: TestClient,
+        db_session: Session,
         web_tenant: Tenant,
         web_owner: User,
     ):
-        headers = {"x-tenant-id": str(web_tenant.id), "x-user-role": "owner"}
-        res = client.get("/exports/accountant.csv", headers=headers)
+        authenticate_client(client, db_session, web_owner)
+        res = client.get("/exports/accountant.csv")
         assert res.status_code == 200
         assert "text/csv" in res.headers["content-type"]
         assert "PARTNER ACCOUNTANT EXPORT" in res.text

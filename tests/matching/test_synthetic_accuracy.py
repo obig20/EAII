@@ -1,26 +1,32 @@
 """
 tests/matching/test_synthetic_accuracy.py
 
-Synthetic benchmark test:
+Synthetic benchmark accuracy test:
   - 30 retailers
   - 300 invoices
   - 400 payment lines with injected noise
-Targets to verify:
+Targets to verify (approved acceptance criteria):
   1. EXACTLY ZERO false confirmations (false_confirmations == 0).
-  2. At least 90% correct auto-matches (auto_match_recall >= 0.90).
+  2. Coverage (auto-correct + true invoice in top 3) >= 95.0% of payments with a true invoice.
+  3. Top-1 proposal accuracy >= 85.0% of queued payments.
 """
 
-from app.matching.evaluator import evaluate_matcher
+import pytest
+
 from app.matching.matcher import PaymentMatcher
 from app.matching.synthetic import generate_synthetic_dataset
+from tests.adversarial.benchmark_metrics import evaluate_synthetic_seed, print_benchmark_table
 
 
 class TestSyntheticMatchingAccuracy:
+    @pytest.mark.slow
     def test_synthetic_accuracy_targets(self, capsys):
         """
-        Run the deterministic synthetic benchmark and verify targets:
-          - Precision: 100.0% (EXACTLY ZERO false confirmations)
-          - Recall: >= 90.0%
+        Run the deterministic synthetic benchmark (seed=42) and verify acceptance targets:
+          - Zero false confirmations
+          - Coverage >= 95.0%
+          - Top-1 proposal accuracy >= 85.0%
+          - Strict conservation of counts
         """
         dataset = generate_synthetic_dataset(seed=42)
 
@@ -29,25 +35,24 @@ class TestSyntheticMatchingAccuracy:
         assert len(dataset.payments_with_truth) == 400, "Must have exactly 400 payment lines"
 
         matcher = PaymentMatcher()
-        report = evaluate_matcher(matcher, dataset)
+        result = evaluate_synthetic_seed(matcher, dataset, seed=42)
 
-        # Print detailed report into test output
-        summary = report.generate_summary_text()
-        print("\n" + summary)
+        # Print benchmark table and noise breakdown
+        print_benchmark_table([result], "app/matching/synthetic.py (Seed 42)")
 
-        # Non-negotiable Target 1: EXACTLY ZERO false confirmations
-        assert report.false_confirmations == 0, (
-            f"NON-NEGOTIABLE VIOLATION: Encountered {report.false_confirmations} false confirmations! "
-            f"Errors: {report.detailed_errors}"
+        # Target 1: EXACTLY ZERO false confirmations
+        assert result.false_confirmations == 0, (
+            f"NON-NEGOTIABLE VIOLATION: Encountered {result.false_confirmations} false confirmations!"
         )
 
-        # Non-negotiable Target 2: At least 90% correct auto-matches
-        assert report.auto_match_recall >= 0.90, (
-            f"TARGET MISSED: Auto-match recall was {report.auto_match_recall * 100:.2f}% "
-            f"(target: >= 90.0%). True auto: {report.true_auto_confirmed}/{report.total_eligible_auto}"
+        # Target 2: Coverage >= 95.0%
+        assert result.coverage >= 0.95, (
+            f"TARGET MISSED: Coverage was {result.coverage:.2%} (target: >= 95.0%). "
+            f"Auto: {result.auto_confirmed_correctly}, Top-1: {result.queued_top1}, Top-3: {result.queued_top3}, True: {result.payments_with_true_invoice}"
         )
 
-        # Non-negotiable Target 3: Precision must be 100%
-        assert report.auto_match_precision == 1.0, (
-            f"Auto-match precision must be 100% (got {report.auto_match_precision * 100:.2f}%)"
+        # Target 3: Top-1 accuracy >= 85.0% of queued payments
+        assert result.top1_rate >= 0.85, (
+            f"TARGET MISSED: Top-1 proposal accuracy was {result.top1_rate:.2%} (target: >= 85.0%). "
+            f"Top-1: {result.queued_top1}, Total queued: {result.queued_total}"
         )

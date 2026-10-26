@@ -128,12 +128,13 @@ class BaseImporter:
         *,
         tenant_id: uuid.UUID,
         batch_id: uuid.UUID,
+        file_hash: str | None = None,
     ) -> list[PaymentLine]:
-        """Convert a sequence of raw row dicts into PaymentLine entities."""
+        """Convert a sequence of raw row dicts into PaymentLine entities with deduplication keys."""
         cfg = self.config
         lines: list[PaymentLine] = []
 
-        for row in raw_rows[cfg.skip_rows:]:
+        for row_idx, row in enumerate(raw_rows[cfg.skip_rows:], start=1):
             # Check polarity if configured (ignore debits/withdrawals)
             if cfg.polarity_column and cfg.credit_value:
                 polarity_val = str(row.get(cfg.polarity_column, "")).strip().lower()
@@ -175,17 +176,25 @@ class BaseImporter:
                 else None
             )
 
-            # Transaction ID
+            # Transaction ID (SEC-10: primary dedupe key)
             tx_id = (
                 str(row[cfg.tx_id_column]).strip()
                 if cfg.tx_id_column and row.get(cfg.tx_id_column)
                 else None
             )
 
+            # Row key: bank tx_id as primary; positional key incorporating line index as fallback
+            short_hash = (file_hash[:16]) if file_hash else str(batch_id)[:8]
+            if tx_id:
+                row_key = f"{cfg.source_name}:tx:{tx_id}"
+            else:
+                row_key = f"{cfg.source_name}:pos:{short_hash}:{row_idx}:{val_date}:{santim}"
+
             line = PaymentLine(
                 id=uuid.uuid4(),
                 tenant_id=tenant_id,
                 source_ref=tx_id,
+                row_key=row_key,
                 amount_santim=santim,
                 value_date=val_date,
                 counterparty_name=cp_name,
@@ -210,9 +219,47 @@ class BaseImporter:
         filename: str | None = None,
     ) -> tuple[ImportBatch, list[PaymentLine]]:
         """
-        Parses statement, persists ImportBatch and PaymentLines,
-        and records an append-only event log entry.
+        Parses statement, persists ImportBatch and PaymentLines idempotently,
+        and records an append-only event log entry (SEC-10).
         """
+        import hashlib
+        from sqlalchemy import func, select
+
+        # 1. Compute SHA-256 hash of file content for idempotent ingestion
+        file_bytes = b""
+        if isinstance(content_or_path, (bytes, bytearray)):
+            file_bytes = bytes(content_or_path)
+        elif isinstance(content_or_path, str):
+            import os
+            if os.path.exists(content_or_path):
+                with open(content_or_path, "rb") as f:
+                    file_bytes = f.read()
+            else:
+                file_bytes = content_or_path.encode("utf-8")
+        elif hasattr(content_or_path, "read"):
+            pos = content_or_path.tell() if hasattr(content_or_path, "tell") else None
+            file_bytes = content_or_path.read()
+            if isinstance(file_bytes, str):
+                file_bytes = file_bytes.encode("utf-8")
+            if pos is not None and hasattr(content_or_path, "seek"):
+                content_or_path.seek(pos)
+
+        file_hash = hashlib.sha256(file_bytes).hexdigest() if file_bytes else None
+
+        # 2. Check if identical file was already imported for this tenant (Idempotency)
+        if file_hash:
+            existing_batch = session.execute(
+                select(ImportBatch).where(
+                    ImportBatch.tenant_id == tenant_id,
+                    ImportBatch.file_hash == file_hash,
+                )
+            ).scalar_one_or_none()
+            if existing_batch:
+                existing_lines = session.execute(
+                    select(PaymentLine).where(PaymentLine.import_batch_id == existing_batch.id)
+                ).scalars().all()
+                return existing_batch, list(existing_lines)
+
         batch_id = uuid.uuid4()
         now = datetime.now(timezone.utc)
 
@@ -222,18 +269,45 @@ class BaseImporter:
             source_type=self.config.source_name,
             evidence_level=self.config.evidence_level.value,
             filename=filename,
+            file_hash=file_hash,
             imported_by=user_id,
             imported_at=now,
         )
         session.add(batch)
 
         raw_rows = self.extract_raw_rows(content_or_path)
-        lines = self.parse_rows(raw_rows, tenant_id=tenant_id, batch_id=batch_id)
+        lines = self.parse_rows(raw_rows, tenant_id=tenant_id, batch_id=batch_id, file_hash=file_hash)
 
+        # Check existing row_keys to ensure no duplicate line insertion across files
         for line in lines:
+            if line.row_key:
+                exists = session.execute(
+                    select(PaymentLine.id).where(
+                        PaymentLine.tenant_id == tenant_id,
+                        PaymentLine.row_key == line.row_key,
+                    )
+                ).scalar_one_or_none()
+                if exists:
+                    continue
             session.add(line)
 
         session.flush()
+
+        # Date range overlap detection
+        overlap_warning = None
+        if lines:
+            min_date = min(l.value_date for l in lines)
+            max_date = max(l.value_date for l in lines)
+            overlap_count = session.execute(
+                select(func.count(PaymentLine.id)).where(
+                    PaymentLine.tenant_id == tenant_id,
+                    PaymentLine.import_batch_id != batch_id,
+                    PaymentLine.value_date >= min_date,
+                    PaymentLine.value_date <= max_date,
+                )
+            ).scalar_one()
+            if overlap_count > 0:
+                overlap_warning = f"Statement date range ({min_date} to {max_date}) overlaps with {overlap_count} existing payments."
 
         # Append-only event for auditability (Rule 4)
         append_event(
@@ -247,8 +321,10 @@ class BaseImporter:
             payload={
                 "source_type": self.config.source_name,
                 "filename": filename,
+                "file_hash": file_hash,
                 "lines_count": len(lines),
                 "total_santim": sum(line.amount_santim for line in lines),
+                "overlap_warning": overlap_warning,
             },
         )
 

@@ -28,6 +28,7 @@ from app.kernel.enums import InvoiceState
 from app.kernel.events import append_event
 from app.kernel.models import Invoice, Retailer
 from app.kernel.money import validate_santim
+from app.kernel.tenant import set_tenant
 
 
 class DuplicateInvoiceError(ValueError):
@@ -102,6 +103,7 @@ def record_credit_sale(
     if not clean_inv_num:
         raise InvalidSaleError("Invoice number cannot be empty.")
 
+    set_tenant(session, tenant_id)
     validated_santim = validate_santim(amount_santim)
 
     if due_date < issued_date:

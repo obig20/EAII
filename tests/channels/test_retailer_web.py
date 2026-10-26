@@ -27,6 +27,7 @@ from app.kernel.enums import EvidenceLevel, InvoiceState, PaymentState
 from app.kernel.models import Invoice, PaymentLine, Retailer, RetailerConfirmationToken, Tenant, User
 from app.kernel.retailer_confirmation import create_retailer_confirmation_token
 from app.main import app
+from tests.conftest import authenticate_client
 
 
 @pytest.fixture
@@ -86,14 +87,15 @@ class TestRetailerWebConfirmation:
     def test_generate_token_endpoint(
         self,
         client: TestClient,
+        db_session: Session,
         tenant_a: Tenant,
         owner_user_a: User,
         retailer_with_invoices: tuple[Retailer, list[Invoice]],
     ):
         ret, _ = retailer_with_invoices
-        headers = {"x-tenant-id": str(tenant_a.id), "x-user-role": "owner"}
+        authenticate_client(client, db_session, owner_user_a)
 
-        response = client.post(f"/retailers/{ret.id}/confirmation-token", headers=headers)
+        response = client.post(f"/retailers/{ret.id}/confirmation-token")
         assert response.status_code == 200
         data = response.json()
         assert "raw_token" in data

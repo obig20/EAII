@@ -1,7 +1,8 @@
 """
 app/channels/telegram/auth.py
 
-Telegram user authentication, invite-code registration, and session resolution.
+Telegram user authentication, persistent invite-code registration in PostgreSQL,
+and session resolution.
 """
 
 from __future__ import annotations
@@ -9,7 +10,6 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -17,42 +17,49 @@ from sqlalchemy.orm import Session
 
 from app.kernel.enums import UserRole
 from app.kernel.events import append_event
-from app.kernel.models import Tenant, User
+from app.kernel.models import TelegramInvite, Tenant, User
 from app.kernel.tenant import set_tenant
 
 
-@dataclass
-class InviteCode:
-    code: str
-    tenant_id: uuid.UUID
-    role: str
-    display_name: str
-    expires_at: datetime
-    used_by: int | None = None
-
-
-# Thread-safe in-memory store for active invite codes
-# Default invite code for testing/development
-_INVITE_CODES: dict[str, InviteCode] = {}
+# Thread-safe in-memory store for UI language preferences (en/am)
 _USER_LANGUAGES: dict[int, str] = {}
 
 
 def generate_invite_code(
+    session: Session,
+    *,
     tenant_id: uuid.UUID,
     role: str = "cashier",
     display_name: str = "Telegram User",
     expires_in_hours: int = 72,
 ) -> str:
-    """Generate an alphanumeric invite code for Telegram onboarding."""
+    """Generate an alphanumeric invite code stored hashed in PostgreSQL."""
     code = f"DC-{secrets.token_hex(3).upper()}"
+    code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
     now = datetime.now(timezone.utc)
-    _INVITE_CODES[code] = InviteCode(
-        code=code,
+
+    invite = TelegramInvite(
+        id=uuid.uuid4(),
         tenant_id=tenant_id,
+        code_hash=code_hash,
         role=role,
         display_name=display_name,
         expires_at=now + timedelta(hours=expires_in_hours),
+        used_at=None,
+        used_by_telegram_id=None,
     )
+    session.add(invite)
+    session.flush()
+
+    append_event(
+        session,
+        tenant_id=tenant_id,
+        event_type="auth.telegram_invite_created",
+        aggregate_type="telegram_invite",
+        aggregate_id=invite.id,
+        payload={"role": role},
+    )
+
     return code
 
 
@@ -63,16 +70,33 @@ def redeem_invite_code(
     telegram_id: int,
 ) -> tuple[Tenant, User] | None:
     """
-    Validate invite code and link Telegram ID to tenant user.
-    Hashed at rest or stored safely.
+    Validate invite code against PostgreSQL and link Telegram ID to tenant user.
+    Single-use only.
     """
     clean_code = code.strip().upper()
-    invite = _INVITE_CODES.get(clean_code)
+    code_hash = hashlib.sha256(clean_code.encode("utf-8")).hexdigest()
+
+    invite = None
+    if session.bind and session.bind.dialect.name == "postgresql":
+        from sqlalchemy import text
+        row = session.execute(
+            text("SELECT id, tenant_id, role, display_name, expires_at, used_at FROM lookup_telegram_invite(:chash)"),
+            {"chash": code_hash},
+        ).mappings().first()
+        if not row:
+            return None
+        set_tenant(session, row["tenant_id"])
+        invite = session.get(TelegramInvite, row["id"])
+    else:
+        invite = session.execute(
+            select(TelegramInvite).where(TelegramInvite.code_hash == code_hash)
+        ).scalar_one_or_none()
+
     if not invite:
         return None
 
     now = datetime.now(timezone.utc)
-    if invite.expires_at < now or invite.used_by is not None:
+    if invite.expires_at < now or invite.used_at is not None:
         return None
 
     tenant = session.get(Tenant, invite.tenant_id)
@@ -93,14 +117,17 @@ def redeem_invite_code(
             role=invite.role,
             display_name=invite.display_name,
             telegram_id=telegram_id,
+            is_active=True,
             created_at=now,
         )
         session.add(user)
     else:
         user.role = invite.role
+        user.is_active = True
 
+    invite.used_at = now
+    invite.used_by_telegram_id = telegram_id
     session.flush()
-    invite.used_by = telegram_id
 
     append_event(
         session,
@@ -111,7 +138,6 @@ def redeem_invite_code(
         actor_id=user.id,
         payload={
             "role": user.role,
-            "invite_code": clean_code,
         },
     )
 
@@ -123,11 +149,23 @@ def get_user_by_telegram_id(
     telegram_id: int,
 ) -> tuple[Tenant, User] | None:
     """Look up tenant and user record by registered Telegram ID."""
-    user = session.execute(
-        select(User).where(User.telegram_id == telegram_id)
-    ).scalars().first()
+    user = None
+    if session.bind and session.bind.dialect.name == "postgresql":
+        from sqlalchemy import text
+        row = session.execute(
+            text("SELECT id, tenant_id, role, display_name, is_active FROM lookup_user_by_telegram_id(:tg_id)"),
+            {"tg_id": telegram_id},
+        ).mappings().first()
+        if not row or not row["is_active"]:
+            return None
+        set_tenant(session, row["tenant_id"])
+        user = session.get(User, row["id"])
+    else:
+        user = session.execute(
+            select(User).where(User.telegram_id == telegram_id)
+        ).scalars().first()
 
-    if not user:
+    if not user or not user.is_active:
         return None
 
     set_tenant(session, user.tenant_id)

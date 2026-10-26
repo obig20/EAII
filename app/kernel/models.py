@@ -21,9 +21,11 @@ from datetime import date, datetime
 from sqlalchemy import (
     TIMESTAMP,
     BigInteger,
+    Boolean,
     CheckConstraint,
     Date,
     ForeignKey,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -87,6 +89,12 @@ class User(Base):
         String(20), nullable=False  # 'owner' | 'cashier'
     )
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     # telegram_id stored hashed in Stage 4; kept nullable here
     telegram_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -94,6 +102,100 @@ class User(Base):
     )
 
     tenant: Mapped["Tenant"] = relationship(back_populates="users")
+    sessions: Mapped[list["Session"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
+# ---------------------------------------------------------------------------
+# sessions
+# ---------------------------------------------------------------------------
+class Session(Base):
+    __tablename__ = "sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False
+    )
+    last_activity_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False
+    )
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    tenant: Mapped["Tenant"] = relationship()
+    user: Mapped["User"] = relationship(back_populates="sessions")
+
+
+# ---------------------------------------------------------------------------
+# rate_limit_buckets (persistent rate limiting & lockout)
+# ---------------------------------------------------------------------------
+class RateLimitBucket(Base):
+    __tablename__ = "rate_limit_buckets"
+
+    key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    first_attempt_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False
+    )
+    last_attempt_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+
+
+# ---------------------------------------------------------------------------
+# auth_failures (un-tenanted persistent failed auth log, SEC-12, SEC-06)
+# ---------------------------------------------------------------------------
+class AuthFailure(Base):
+    __tablename__ = "auth_failures"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    identifier_hmac: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    ip_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failed_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+
+# ---------------------------------------------------------------------------
+# telegram_invites
+# ---------------------------------------------------------------------------
+class TelegramInvite(Base):
+    __tablename__ = "telegram_invites"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    code_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False
+    )
+    used_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    used_by_telegram_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    tenant: Mapped["Tenant"] = relationship()
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +229,9 @@ class Retailer(Base):
 # ---------------------------------------------------------------------------
 class ImportBatch(Base):
     __tablename__ = "import_batches"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "file_hash", name="uq_import_batches_tenant_file_hash"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -139,6 +244,7 @@ class ImportBatch(Base):
         String(2), nullable=False  # 'L1' | 'L2' | 'L3' | 'L4'
     )
     filename: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     imported_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
@@ -201,6 +307,7 @@ class PaymentLine(Base):
     __tablename__ = "payment_lines"
     __table_args__ = (
         CheckConstraint("amount_santim > 0", name="ck_payment_line_amount_positive"),
+        UniqueConstraint("tenant_id", "row_key", name="uq_payment_lines_tenant_row_key"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -210,6 +317,7 @@ class PaymentLine(Base):
         UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
     )
     source_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    row_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     amount_santim: Mapped[int] = mapped_column(BigInteger, nullable=False)
     value_date: Mapped[date] = mapped_column(Date, nullable=False)
     counterparty_name: Mapped[str | None] = mapped_column(Text, nullable=True)

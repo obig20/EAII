@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Login — Daily Close (Birana Technology){% endblock %}
+
+{% block content %}
+<div class="max-w-md mx-auto my-12 bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+  <div class="bg-slate-900 px-8 py-6 text-center">
+    <div class="text-3xl font-black text-amber-400">DAILY CLOSE</div>
+    <div class="text-xs text-slate-400 mt-1 uppercase tracking-wider">ዕለታዊ ሂሳብ ማጠቃለያ · Secure Sign In</div>
+  </div>
+
+  <div class="p-8">
+    {% if error %}
+    <div class="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm font-medium flex items-center space-x-2">
+      <span>✕</span>
+      <span>{{ error }}</span>
+    </div>
+    {% endif %}
+
+    <form method="POST" action="/login" class="space-y-5">
+      <div>
+        <label for="identifier" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+          Email or Phone (+251...)
+        </label>
+        <input
+          type="text"
+          id="identifier"
+          name="identifier"
+          required
+          autofocus
+          placeholder="e.g. owner@birana.et or +251911223344"
+          class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-sm font-medium transition"
+        >
+      </div>
+
+      <div>
+        <label for="password" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+          Password
+        </label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          required
+          placeholder="••••••••••••"
+          class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-sm font-medium transition"
+        >
+      </div>
+
+      <button
+        type="submit"
+        class="w-full bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold py-3.5 px-6 rounded-xl transition shadow-lg shadow-slate-900/10 text-sm uppercase tracking-wider"
+      >
+        Sign In →
+      </button>
+    </form>
+
+    <div class="mt-8 pt-6 border-t border-slate-100 text-center text-xs text-slate-400 leading-relaxed">
+      No self-service sign up. Accounts are provisioned exclusively by tenant owners or system administrator.
+    </div>
+  </div>
+</div>
+{% endblock %}

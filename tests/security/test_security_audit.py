@@ -52,6 +52,7 @@ from app.kernel.tenant import set_tenant
 from app.main import app
 from app.reports.aging import generate_aging_report
 from app.reports.exports import export_accountant_csv, export_sales_csv
+from tests.conftest import authenticate_client
 
 
 @pytest.fixture
@@ -117,6 +118,7 @@ class TestTenantIsolationSecurity:
         now = datetime.now(timezone.utc)
         today = now.date()
 
+        set_tenant(db_session, tenant_b.id)
         ret_b = Retailer(id=uuid.uuid4(), tenant_id=tenant_b.id, name="Retailer B", created_at=now)
         db_session.add(ret_b)
         db_session.flush()
@@ -152,6 +154,7 @@ class TestTenantIsolationSecurity:
     ):
         """When Tenant B context is set, querying retailer tokens only sees Tenant B tokens."""
         now = datetime.now(timezone.utc)
+        set_tenant(db_session, tenant_a.id)
         ret_a = Retailer(id=uuid.uuid4(), tenant_id=tenant_a.id, name="Ret A", created_at=now)
         db_session.add(ret_a)
         db_session.flush()
@@ -175,12 +178,13 @@ class TestTenantIsolationSecurity:
         db_session.execute(text("RESET ROLE"))
 
     def test_web_header_tenant_isolation(
-        self, client: TestClient, db_session: Session, tenant_a: Tenant, tenant_b: Tenant, owner_user_a: User
+        self, client: TestClient, db_session: Session, tenant_a: Tenant, tenant_b: Tenant, owner_user_a: User, owner_user_b: User
     ):
-        """A user requesting with Tenant B header cannot see Tenant A invoices on the dashboard."""
+        """A user requesting with Tenant B session cannot see Tenant A invoices on the dashboard, even with forged Tenant A headers."""
         now = datetime.now(timezone.utc)
         today = now.date()
 
+        set_tenant(db_session, tenant_a.id)
         ret_a = Retailer(id=uuid.uuid4(), tenant_id=tenant_a.id, name="Strict Tenant A Retailer", created_at=now)
         db_session.add(ret_a)
         db_session.flush()
@@ -199,8 +203,11 @@ class TestTenantIsolationSecurity:
         db_session.add(inv_a)
         db_session.commit()
 
-        # Request dashboard with Tenant B headers
-        resp_b = client.get("/", headers={"x-tenant-id": str(tenant_b.id), "x-user-role": "owner"})
+        # Authenticate as Tenant B owner
+        authenticate_client(client, db_session, owner_user_b)
+
+        # Request dashboard with Tenant A spoof headers (must be ignored)
+        resp_b = client.get("/", headers={"x-tenant-id": str(tenant_a.id)})
         assert resp_b.status_code == 200
         assert "INV-SECRET-TENANT-A" not in resp_b.text
         assert "Strict Tenant A Retailer" not in resp_b.text
@@ -253,7 +260,8 @@ class TestInjectionSecurity:
         db_session.add(ret)
         db_session.commit()
 
-        resp = client.get("/", headers={"x-tenant-id": str(tenant_a.id)})
+        authenticate_client(client, db_session, owner_user_a)
+        resp = client.get("/")
         assert resp.status_code == 200
         # Must be escaped: &lt;script&gt;
         assert "<script>alert('pwned')</script>" not in resp.text
@@ -266,36 +274,40 @@ class TestInjectionSecurity:
 class TestFileUploadSecurity:
     """Verify upload validation for file extensions, size caps, and zip bomb immunity."""
 
-    def test_reject_disallowed_extension_for_sales_bulk(self, client: TestClient, tenant_a: Tenant):
+    def test_reject_disallowed_extension_for_sales_bulk(self, client: TestClient, db_session: Session, tenant_a: Tenant, owner_user_a: User):
         """Uploading an executable or script instead of CSV is rejected with HTTP 400."""
+        authenticate_client(client, db_session, owner_user_a)
         payload = b"malicious binary payload"
         files = {"file": ("exploit.exe", payload, "application/octet-stream")}
-        resp = client.post("/sales/bulk", files=files, headers={"x-tenant-id": str(tenant_a.id)})
+        resp = client.post("/sales/bulk", files=files)
         assert resp.status_code == 400
         assert "Invalid file extension" in resp.json()["detail"]
 
-    def test_reject_disallowed_extension_for_statement_upload(self, client: TestClient, tenant_a: Tenant):
+    def test_reject_disallowed_extension_for_statement_upload(self, client: TestClient, db_session: Session, tenant_a: Tenant, owner_user_a: User):
         """Uploading a disallowed format for statement import is rejected with HTTP 400."""
+        authenticate_client(client, db_session, owner_user_a)
         payload = b"%PDF-1.4 malicious pdf"
         files = {"file": ("statement.pdf", payload, "application/pdf")}
         data = {"source_name": "cbe_csv"}
-        resp = client.post("/statements/upload", data=data, files=files, headers={"x-tenant-id": str(tenant_a.id)})
+        resp = client.post("/statements/upload", data=data, files=files)
         assert resp.status_code == 400
         assert "Invalid file extension" in resp.json()["detail"]
 
-    def test_reject_oversized_file(self, client: TestClient, tenant_a: Tenant):
+    def test_reject_oversized_file(self, client: TestClient, db_session: Session, tenant_a: Tenant, owner_user_a: User):
         """Uploading a file exceeding the 10MB limit is rejected with HTTP 413."""
+        authenticate_client(client, db_session, owner_user_a)
         # Create a payload of 10MB + 1KB
         oversized = b"a" * (10 * 1024 * 1024 + 1024)
         files = {"file": ("huge_sales.csv", oversized, "text/csv")}
-        resp = client.post("/sales/bulk", files=files, headers={"x-tenant-id": str(tenant_a.id)})
+        resp = client.post("/sales/bulk", files=files)
         assert resp.status_code == 413
         assert "File too large" in resp.json()["detail"]
 
-    def test_reject_empty_file(self, client: TestClient, tenant_a: Tenant):
+    def test_reject_empty_file(self, client: TestClient, db_session: Session, tenant_a: Tenant, owner_user_a: User):
         """Uploading an empty file is rejected with HTTP 400."""
+        authenticate_client(client, db_session, owner_user_a)
         files = {"file": ("empty_sales.csv", b"", "text/csv")}
-        resp = client.post("/sales/bulk", files=files, headers={"x-tenant-id": str(tenant_a.id)})
+        resp = client.post("/sales/bulk", files=files)
         assert resp.status_code == 400
         assert "Uploaded file is empty" in resp.json()["detail"]
 
@@ -481,9 +493,9 @@ class TestEvidenceLadderRule2AbsoluteAudit:
         db_session.commit()
 
         # Attempt to confirm via /matches/{id}/approve
+        authenticate_client(client, db_session, owner_user_a)
         resp = client.post(
             f"/matches/{pm.id}/approve",
-            headers={"x-tenant-id": str(tenant_a.id), "x-user-role": "owner"},
         )
         assert resp.status_code == 400
         assert "cannot set a payment to 'confirmed'" in resp.json()["detail"]

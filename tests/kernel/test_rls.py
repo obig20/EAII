@@ -212,6 +212,8 @@ class TestRlsTenantIsolation:
         """Positive test: Tenant B can see its OWN retailers."""
         from app.kernel.models import Retailer
 
+        _set_tenant(db_session, tenant_b.id)
+
         retailer_b = Retailer(
             id=uuid.uuid4(),
             tenant_id=tenant_b.id,
@@ -220,8 +222,6 @@ class TestRlsTenantIsolation:
         )
         db_session.add(retailer_b)
         db_session.flush()
-
-        _set_tenant(db_session, tenant_b.id)
 
         result = db_session.execute(
             text("SELECT id FROM retailers WHERE id = :rid"),

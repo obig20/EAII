@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}User Management — Daily Close{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-black text-slate-900 tracking-tight">User Management</h1>
+      <p class="text-xs text-slate-500 mt-1">Provision staff accounts, reset passwords, and manage permissions for {{ tenant_name }}.</p>
+    </div>
+    <a href="/dashboard" class="text-xs font-bold text-slate-600 hover:text-slate-900 bg-white border border-slate-300 px-4 py-2 rounded-xl transition">
+      ← Back to Dashboard
+    </a>
+  </div>
+
+  {% if message %}
+  <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-medium">
+    ✓ {{ message }}
+  </div>
+  {% endif %}
+
+  <!-- User Creation Card -->
+  <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+    <h2 class="text-sm font-bold text-slate-900 uppercase tracking-wider mb-4">Provision New User Account</h2>
+    <form method="POST" action="/settings/users" class="grid grid-cols-1 md:grid-cols-5 gap-4">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Display Name</label>
+        <input type="text" name="display_name" required placeholder="e.g. Almaz Bekele" class="w-full px-3 py-2 text-sm border rounded-xl">
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Email</label>
+        <input type="email" name="email" placeholder="almaz@wholesaler.et" class="w-full px-3 py-2 text-sm border rounded-xl">
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Phone</label>
+        <input type="text" name="phone" placeholder="+251911223344" class="w-full px-3 py-2 text-sm border rounded-xl">
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Role</label>
+        <select name="role" required class="w-full px-3 py-2 text-sm border rounded-xl">
+          <option value="cashier">Cashier</option>
+          <option value="owner">Owner</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Password (min 10 chars)</label>
+        <input type="password" name="password" required minlength="10" placeholder="••••••••••••" class="w-full px-3 py-2 text-sm border rounded-xl">
+      </div>
+
+      <div class="md:col-span-5 flex justify-end pt-2">
+        <button type="submit" class="bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold px-6 py-2.5 rounded-xl text-xs uppercase tracking-wider transition">
+          Create Account +
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- User Table -->
+  <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+      <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider">Tenant Users</h3>
+      <span class="text-xs text-slate-400">{{ users|length }} Total Users</span>
+    </div>
+
+    <table class="w-full text-left text-sm">
+      <thead class="bg-slate-50 text-slate-500 text-xs uppercase">
+        <tr>
+          <th class="px-6 py-3 font-semibold">User</th>
+          <th class="px-6 py-3 font-semibold">Role</th>
+          <th class="px-6 py-3 font-semibold">Contact</th>
+          <th class="px-6 py-3 font-semibold">Status</th>
+          <th class="px-6 py-3 font-semibold text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for u in users %}
+        <tr class="hover:bg-slate-50 transition">
+          <td class="px-6 py-4">
+            <div class="font-bold text-slate-900">{{ u.display_name }}</div>
+            <div class="text-xs text-slate-400 font-mono">{{ u.id }}</div>
+          </td>
+          <td class="px-6 py-4">
+            <span class="px-2 py-0.5 rounded text-xs font-bold uppercase {% if u.role == 'owner' %}bg-amber-100 text-amber-800{% else %}bg-blue-100 text-blue-800{% endif %}">
+              {{ u.role }}
+            </span>
+          </td>
+          <td class="px-6 py-4 text-xs text-slate-600">
+            <div>{{ u.email or 'No email' }}</div>
+            <div>{{ u.phone or 'No phone' }}</div>
+          </td>
+          <td class="px-6 py-4">
+            {% if u.is_active %}
+            <span class="inline-flex items-center text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full">
+              Active
+            </span>
+            {% else %}
+            <span class="inline-flex items-center text-xs font-semibold text-rose-700 bg-rose-50 px-2.5 py-0.5 rounded-full">
+              Deactivated
+            </span>
+            {% endif %}
+          </td>
+          <td class="px-6 py-4 text-right space-x-2">
+            {% if u.id != current_user_id %}
+            <form method="POST" action="/settings/users/{{ u.id }}/reset-password" class="inline-block">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="new_password" value="BiranaTemp#2026!">
+              <button type="submit" onclick="return confirm('Reset password for {{ u.display_name }} to BiranaTemp#2026!?')" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium underline">
+                Reset Password
+              </button>
+            </form>
+
+            {% if u.is_active %}
+            <form method="POST" action="/settings/users/{{ u.id }}/deactivate" class="inline-block">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" onclick="return confirm('Deactivate account for {{ u.display_name }}?')" class="text-xs text-rose-600 hover:text-rose-800 font-medium underline">
+                Deactivate
+              </button>
+            </form>
+            {% endif %}
+            {% else %}
+            <span class="text-xs text-slate-400 italic">Current User</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

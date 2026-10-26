@@ -13,7 +13,7 @@
     .htmx-request .htmx-indicator { display: inline-block; }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col font-sans">
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col font-sans" hx-headers='{"x-csrf-token": "{{ csrf_token }}"}'>
   <!-- Top Navigation Header -->
   <header class="bg-slate-900 text-white shadow-md">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
@@ -23,11 +23,20 @@
         <span class="text-xs text-slate-400">| ዕለታዊ ሂሳብ ማጠቃለያ</span>
       </div>
       <div class="flex items-center space-x-4 text-sm">
-        <span class="text-slate-300">Tenant: <strong class="text-white">{{ tenant_name or 'Addis Wholesalers' }}</strong></span>
+        {% if user_role %}
+        <span class="text-slate-300">Tenant: <strong class="text-white">{{ tenant_name }}</strong></span>
         <span class="px-2.5 py-1 rounded-full text-xs font-medium {% if user_role == 'owner' %}bg-amber-500/20 text-amber-300 border border-amber-500/30{% else %}bg-blue-500/20 text-blue-300 border border-blue-500/30{% endif %}">
           Role: {{ user_role|capitalize }}
         </span>
+        {% if user_role == 'owner' %}
+        <a href="/settings/users" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded transition">Users</a>
+        {% endif %}
         <a href="/brief" target="_blank" class="text-xs bg-slate-800 hover:bg-slate-700 text-amber-300 px-3 py-1.5 rounded transition">Morning Brief</a>
+        <form method="POST" action="/logout" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="text-xs text-rose-300 hover:text-rose-100 bg-rose-950/40 border border-rose-800/40 px-2.5 py-1 rounded transition">Log out</button>
+        </form>
+        {% endif %}
       </div>
     </div>
   </header>

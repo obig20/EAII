@@ -168,7 +168,7 @@ class TestMatchingRules:
         assert {m.invoice_id for m in res.matches} == {inv1.id, inv2.id}
 
     # -----------------------------------------------------------------------
-    # Tier B Tests
+    # Tier B Tests (SEC-11: Tier B is routed to review queue as proposed)
     # -----------------------------------------------------------------------
     def test_tier_b_counterparty_phone_match(self):
         ret = _make_retailer(phone="0911223344")
@@ -188,7 +188,7 @@ class TestMatchingRules:
         )
 
         res = self.matcher.match_payment(pl, [inv], [ret])
-        assert res.status == "auto_confirmed"
+        assert res.status == "proposed"
         assert res.tier == MatchTier.TIER_B
         assert res.matches[0].invoice_id == inv.id
 
@@ -215,7 +215,7 @@ class TestMatchingRules:
         assert res.is_ambiguous is True
 
     # -----------------------------------------------------------------------
-    # Tier C Tests
+    # Tier C Tests (SEC-11: Tier C is routed to review queue as proposed)
     # -----------------------------------------------------------------------
     def test_tier_c_fuzzy_name_match(self):
         ret = _make_retailer(name="Kassahun Desta General Store")
@@ -235,6 +235,6 @@ class TestMatchingRules:
         )
 
         res = self.matcher.match_payment(pl, [inv], [ret])
-        assert res.status == "auto_confirmed"
+        assert res.status == "proposed"
         assert res.tier == MatchTier.TIER_C
         assert res.matches[0].invoice_id == inv.id
