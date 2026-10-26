@@ -1,0 +1,26 @@
+# deploy/dailyclose-bot.service
+# Systemd service unit for Daily Close Telegram Bot Worker
+
+[Unit]
+Description=Daily Close Telegram Bot Service (Birana Technology)
+After=network.target postgresql.service dailyclose-web.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=dailyclose
+Group=dailyclose
+WorkingDirectory=/opt/dailyclose
+EnvironmentFile=/opt/dailyclose/.env
+ExecStart=/opt/dailyclose/.venv/bin/python -m app.channels.telegram.bot
+Restart=always
+RestartSec=10s
+
+# Security sandboxing
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

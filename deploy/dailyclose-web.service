@@ -1,0 +1,32 @@
+# deploy/dailyclose-web.service
+# Systemd service unit for Daily Close Web Application on Ubuntu/Debian host
+
+[Unit]
+Description=Daily Close FastAPI Web Service (Birana Technology)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=dailyclose
+Group=dailyclose
+WorkingDirectory=/opt/dailyclose
+EnvironmentFile=/opt/dailyclose/.env
+ExecStart=/opt/dailyclose/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 4 --proxy-headers
+Restart=always
+RestartSec=5s
+
+# Security sandboxing
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Resource limits
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

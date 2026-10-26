@@ -15,6 +15,7 @@ Rules enforced:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -29,6 +30,7 @@ from app.kernel.enums import EvidenceLevel, InvoiceState, MatchState, PaymentSta
 from app.kernel.events import append_event
 from app.kernel.models import Invoice, PaymentLine, PaymentMatch, Retailer, RetailerConfirmationToken
 from app.kernel.money import to_etb, validate_santim
+from app.kernel.tenant import set_tenant
 
 
 class DisputeReasonCode(str, Enum):
@@ -117,8 +119,11 @@ def validate_confirmation_token(
         select(RetailerConfirmationToken).where(RetailerConfirmationToken.token_hash == thash)
     ).scalar_one_or_none()
 
-    if not token_record:
+    if not token_record or not hmac.compare_digest(token_record.token_hash, thash):
         raise TokenNotFoundError("Invalid confirmation link. Token not found.")
+
+    # Immediately establish tenant context for downstream RLS queries
+    set_tenant(session, token_record.tenant_id)
 
     now = datetime.now(timezone.utc)
     if token_record.used_at is not None:

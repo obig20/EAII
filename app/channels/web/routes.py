@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import uuid
+import zipfile
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
@@ -54,6 +55,24 @@ from app.reports.morning_brief import generate_morning_brief_text
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+# File upload security limits
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB limit
+ALLOWED_SALES_EXTENSIONS = {".csv"}
+ALLOWED_STATEMENT_EXTENSIONS = {".csv", ".xlsx"}
+
+
+def validate_uploaded_file(file: UploadFile, allowed_extensions: set[str]) -> str:
+    """Validate filename extension and sanitize path."""
+    raw_name = file.filename or ""
+    safe_name = Path(raw_name).name  # Strips directory traversal (/ or \)
+    ext = Path(safe_name).suffix.lower()
+    if not ext or ext not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file extension '{ext}'. Allowed extensions: {', '.join(sorted(allowed_extensions))}",
+        )
+    return safe_name
 
 router = APIRouter()
 
@@ -246,7 +265,13 @@ async def bulk_sales(
     tenant, user = context
     set_tenant(session, tenant.id)
 
-    content = await file.read()
+    validate_uploaded_file(file, ALLOWED_SALES_EXTENSIONS)
+    content = await file.read(MAX_UPLOAD_SIZE + 1)
+    if len(content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail="File too large. Maximum allowed size is 10MB.")
+    if not content or len(content.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
     created, gaps, errors = parse_and_record_sales_csv(
         session,
         tenant_id=tenant.id,
@@ -277,6 +302,13 @@ async def upload_statement(
     tenant, user = context
     set_tenant(session, tenant.id)
 
+    safe_filename = validate_uploaded_file(file, ALLOWED_STATEMENT_EXTENSIONS)
+    content = await file.read(MAX_UPLOAD_SIZE + 1)
+    if len(content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail="File too large. Maximum allowed size is 10MB.")
+    if not content or len(content.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
     # 1. Resolve Config
     cfg_map = {
         "cbe_csv": CBE_CSV_CONFIG,
@@ -286,19 +318,21 @@ async def upload_statement(
     cfg = cfg_map.get(source_name, CBE_CSV_CONFIG)
 
     # 2. Ingest lines
-    content = await file.read()
-    if file.filename and file.filename.endswith(".xlsx"):
+    if safe_filename.endswith(".xlsx"):
         importer = XlsxStatementImporter(cfg)
     else:
         importer = CsvStatementImporter(cfg)
 
-    batch, payment_lines = importer.import_statement(
-        session,
-        tenant_id=tenant.id,
-        user_id=user.id,
-        content_or_path=content,
-        filename=file.filename,
-    )
+    try:
+        batch, payment_lines = importer.import_statement(
+            session,
+            tenant_id=tenant.id,
+            user_id=user.id,
+            content_or_path=content,
+            filename=safe_filename,
+        )
+    except (ValueError, zipfile.BadZipFile) as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to parse statement: {exc}")
 
     # 3. Fetch open invoices & retailers for matching
     open_invoices = session.execute(

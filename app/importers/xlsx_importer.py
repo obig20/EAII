@@ -41,7 +41,24 @@ def _parse_xlsx_pure_python(file_bytes_or_path: Any) -> list[dict[str, Any]]:
     else:
         raise TypeError(f"Unsupported XLSX input type: {type(file_bytes_or_path).__name__}")
 
+    MAX_TOTAL_UNCOMPRESSED_BYTES = 50 * 1024 * 1024  # 50 MB
+    MAX_ZIP_ENTRIES = 1000
+    MAX_COMPRESSION_RATIO = 100
+
     with z:
+        # Zip bomb / decompression bomb protection
+        infolist = z.infolist()
+        if len(infolist) > MAX_ZIP_ENTRIES:
+            raise ValueError(f"XLSX archive has too many files ({len(infolist)} > {MAX_ZIP_ENTRIES}).")
+
+        total_uncompressed = 0
+        for info in infolist:
+            total_uncompressed += info.file_size
+            if total_uncompressed > MAX_TOTAL_UNCOMPRESSED_BYTES:
+                raise ValueError("XLSX archive uncompressed size exceeds 50MB limit (potential zip bomb).")
+            if info.compress_size > 0 and (info.file_size / info.compress_size) > MAX_COMPRESSION_RATIO and info.file_size > 1024 * 1024:
+                raise ValueError("Suspicious compression ratio detected in XLSX archive (potential zip bomb).")
+
         # 1. Parse shared strings if present
         shared_strings: list[str] = []
         if "xl/sharedStrings.xml" in z.namelist():

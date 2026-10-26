@@ -34,6 +34,11 @@ from __future__ import annotations
 
 import os
 import uuid
+
+# Set test defaults for test execution if not explicitly provided
+os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://postgres@localhost:5432/dailyclose_test")
+os.environ.setdefault("SECRET_KEY", "test-secret-key-32-chars-long-minimum!")
+os.environ.setdefault("APP_ENV", "test")
 from datetime import datetime, timezone
 
 import pytest

@@ -31,7 +31,7 @@ services:
 
   app:
     build: .
-    command: uvicorn app.channels.web.main:app --reload --host 0.0.0.0 --port 8000
+    command: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
     depends_on:
       migrate:
         condition: service_completed_successfully
