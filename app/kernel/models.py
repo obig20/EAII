@@ -16,7 +16,7 @@ Do NOT import FastAPI or aiogram here.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
     TIMESTAMP,
@@ -29,6 +29,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -63,6 +64,9 @@ class Tenant(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    is_demo: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False
     )
@@ -329,6 +333,9 @@ class PaymentLine(Base):
     state: Mapped[str] = mapped_column(
         String(25), nullable=False, default="unmatched"
     )
+    is_previously_reversed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     import_batch_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("import_batches.id"), nullable=True
     )
@@ -438,3 +445,54 @@ class RetailerConfirmationToken(Base):
     )
 
     retailer: Mapped["Retailer"] = relationship(back_populates="confirmation_tokens")
+
+
+# ---------------------------------------------------------------------------
+# reversal_notes (deletable notes table, separate from immutable events)
+# ---------------------------------------------------------------------------
+class ReversalNote(Base):
+    __tablename__ = "reversal_notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    payment_match_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("payment_matches.id"), nullable=False, index=True
+    )
+    reason_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+# ---------------------------------------------------------------------------
+# processed_approval_tokens (idempotent retry tracking table)
+# ---------------------------------------------------------------------------
+class ProcessedApprovalToken(Base):
+    __tablename__ = "processed_approval_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    actor_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    payment_match_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("payment_matches.id"), nullable=False, index=True
+    )
+    result_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+

@@ -274,4 +274,44 @@ def export_accountant_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
     writer.writerow([])
     writer.writerow(sanitize_csv_row(["TOTAL UNRESOLVED ITEMS", unmatched_count, "TOTAL UNRESOLVED SANTIM", unmatched_santim, "TOTAL UNRESOLVED ETB", to_etb(unmatched_santim)]))
 
+    # SECTION 3: REVERSED MATCHES AUDIT LOG
+    writer.writerow([])
+    writer.writerow(["--- SECTION 3: REVERSED MATCHES AUDIT LOG ---"])
+    writer.writerow([
+        "Match ID", "Payment ID", "Invoice Number", "Retailer",
+        "Reversed Santim", "Reversed ETB", "Evidence Level", "Relied on L3", "Date",
+    ])
+
+    reversals_stmt = (
+        select(PaymentMatch, PaymentLine, Invoice, Retailer)
+        .join(PaymentLine, PaymentMatch.payment_line_id == PaymentLine.id)
+        .join(Invoice, PaymentMatch.invoice_id == Invoice.id)
+        .join(Retailer, Invoice.retailer_id == Retailer.id)
+        .where(
+            PaymentMatch.tenant_id == tenant_id,
+            PaymentMatch.state == MatchState.REVERSED.value,
+        )
+        .order_by(PaymentMatch.created_at.desc())
+    )
+
+    rev_count = 0
+    rev_santim = 0
+    for pm, pl, inv, ret in session.execute(reversals_stmt):
+        rev_count += 1
+        rev_santim += pm.matched_santim
+        writer.writerow(sanitize_csv_row([
+            str(pm.id),
+            str(pl.id),
+            inv.invoice_number,
+            ret.name,
+            pm.matched_santim,
+            to_etb(pm.matched_santim),
+            pl.evidence_level,
+            "YES" if pl.evidence_level == "L3" else "NO",
+            pm.created_at.isoformat() if pm.created_at else "",
+        ]))
+
+    writer.writerow([])
+    writer.writerow(sanitize_csv_row(["TOTAL REVERSED MATCHES", rev_count, "TOTAL REVERSED SANTIM", rev_santim, "TOTAL REVERSED ETB", to_etb(rev_santim)]))
+
     return output.getvalue()

@@ -15,5 +15,18 @@
   "l4_cannot_confirm": "✕ የደንብ 2 መተላለፍ፡ የስክሪንሾት ማስረጃ (L4) በቀጥታ ሊረጋገጥ አይችልም። ባለቤቱ 'ያልተረጋገጠ' ሊለው ወይም ከባንክ መግለጫ ጋር ሊያያዝ ይችላል።",
   "morning_brief_header": "☀️ የጧት የስብስብ ማጠቃለያ — አዲስ አበባ (EAT)",
   "aging_header": "📊 የብድር ዕድሜ ማጠቃለያ",
-  "help_text": "የትእዛዞች ዝርዝር፡\n• ፈጣን ምዝገባ፡ 'INV381 | ደንበኛ | መጠን | due 30d'\n• ፎቶ መላክ፡ የስክሪንሾት ክፍያ ለግምገማ መላክ\n• /brief፡ የጧት የስብስብ ማጠቃለያ\n• /aging፡ የብድር ዕድሜ ዝርዝር\n• /review፡ በመጠባበቅ ላይ ያሉ ክፍያዎች\n• /lang [en|am]፡ ቋንቋ መቀየር"
+  "help_text": "የትእዛዞች ዝርዝር፡\n• ፈጣን ምዝገባ፡ 'INV381 | ደንበኛ | መጠን | due 30d'\n• ፎቶ መላክ፡ የስክሪንሾት ክፍያ ለግምገማ መላክ\n• /brief፡ የጧት የስብስብ ማጠቃለያ\n• /aging፡ የብድር ዕድሜ ዝርዝር\n• /review፡ በመጠባበቅ ላይ ያሉ ክፍያዎች\n• /lang [en|am]፡ ቋንቋ መቀየር",
+  "wrong_invoice": "የተሳሳተ ደረሰኝ ተመርጧል",
+  "wrong_amount": "የተሳሳተ የተመደበ መጠን",
+  "duplicate": "የተደገመ የክፍያ ማዛመጃ",
+  "bank_reversal": "በባንክ የተመለሰ ክፍያ",
+  "other": "ሌላ አስተዳደራዊ ምክንያት",
+  "amounts_differ_warning": "⚠️ መጠኑ በ{diff_etb} ብር ልዩነት አለው ({match_kind})",
+  "confirm_differing_prompt": "መጠኑ በ{diff_etb} ብር ይለያያል። ለማጽደቅ እርግጠኛ ነዎት?",
+  "cashier_cannot_approve": "ክፍያዎችን ማጽደቅ የሚችሉት የድርጅቱ ባለቤት ብቻ ናቸው።",
+  "cashier_cannot_reverse": "ክፍያዎችን መመለስ የሚችሉት የድርጅቱ ባለቤት ብቻ ናቸው።",
+  "match_reversed": "✓ ማዛመጃው ተሰርዟል። የደረሰኝ እና የክፍያ ቀሪ ሂሳብ ተመልሷል።",
+  "previously_reversed_badge": "ቀደም ሲል የተመለሰ",
+  "relied_on_l3_badge": "⚠️ በL3 የደንበኛ ማረጋገጫ ላይ የተመሰረተ",
+  "unallocated_credit": "ያልተመደበ ክሬዲት፡ {amount_etb} ብር"
 }

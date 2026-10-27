@@ -20,7 +20,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select, text
+from sqlalchemy import case, func, select, text
 from sqlalchemy.orm import Session
 
 from app.channels.web.auth_deps import (
@@ -50,11 +50,12 @@ from app.kernel.auth import (
     verify_password,
 )
 from app.kernel.db import get_session
-from app.kernel.enums import EvidenceLevel, InvoiceState, MatchState, PaymentState, UserRole
+from app.kernel.enums import EvidenceLevel, InvoiceState, MatchState, PaymentState, ReversalReasonCode, UserRole
 from app.kernel.events import append_event
 from app.kernel.guards import InsufficientEvidenceError, assert_confirmable
-from app.kernel.models import ImportBatch, Invoice, PaymentLine, PaymentMatch, RateLimitBucket, Retailer, Session as SessionModel, Tenant, User
+from app.kernel.models import ImportBatch, Invoice, PaymentLine, PaymentMatch, ProcessedApprovalToken, RateLimitBucket, Retailer, ReversalNote, Session as SessionModel, Tenant, User
 from app.kernel.money import to_etb
+from app.kernel.tokens import generate_match_approval_token, hash_approval_token, verify_match_approval_token
 from app.kernel.persistent_rate_limit import (
     RateLimitExceededError,
     check_persistent_rate_limit,
@@ -578,25 +579,138 @@ def dashboard(
         reason = "Unmatched statement entry"
         is_ambiguous = False
         match_id = str(pm.id) if pm else None
+        target_inv = pm.invoice if pm else None
 
-        if pm and pm.invoice:
-            target_invs = pm.invoice.invoice_number
-            reason = f"Proposed {pm.tier} match"
+        inv_open_balance_santim = 0
+        diff_santim = 0
+        diff_etb = "0.00"
+        match_kind = "exact"
+        unallocated_credit_santim = 0
+        unallocated_credit_etb = "0.00"
+        is_differing = False
+        approval_token = ""
+        alt_candidates = []
+
+        if pm and target_inv:
+            target_invs = target_inv.invoice_number
+
+            # Query existing confirmed paid santim on target invoice (excluding this match)
+            inv_confirmed_paid = session.execute(
+                select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
+                .where(
+                    PaymentMatch.invoice_id == target_inv.id,
+                    PaymentMatch.state == MatchState.CONFIRMED.value,
+                    PaymentMatch.id != pm.id,
+                )
+            ).scalar_one()
+            inv_open_balance_santim = max(0, int(target_inv.amount_santim) - int(inv_confirmed_paid))
+
+            # Sum all proposed & confirmed matches on this payment line
+            pl_total_matched = session.execute(
+                select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
+                .where(
+                    PaymentMatch.payment_line_id == pl.id,
+                    PaymentMatch.state.in_([MatchState.CONFIRMED.value, MatchState.PROPOSED.value]),
+                )
+            ).scalar_one()
+            pl_total_matched = int(pl_total_matched)
+
+            # Determine differing status precisely (matched amount differs from invoice open balance OR payment total)
+            is_differing = (int(pm.matched_santim) != int(inv_open_balance_santim)) or (int(pl.amount_santim) != int(pm.matched_santim))
+
+            if pl.amount_santim > pm.matched_santim and pl_total_matched > pm.matched_santim:
+                match_kind = "combined"
+                diff_santim = int(abs(pl.amount_santim - pm.matched_santim))
+            elif pl.amount_santim > inv_open_balance_santim:
+                match_kind = "overpayment"
+                diff_santim = int(pl.amount_santim - inv_open_balance_santim)
+                unallocated_credit_santim = int(max(0, pl.amount_santim - pm.matched_santim))
+                unallocated_credit_etb = to_etb(unallocated_credit_santim)
+            elif pm.matched_santim < inv_open_balance_santim:
+                match_kind = "partial"
+                diff_santim = int(inv_open_balance_santim - pm.matched_santim)
+            else:
+                match_kind = "exact"
+                diff_santim = 0
+
+            diff_etb = to_etb(diff_santim)
+
+            # Generate HMAC-signed stale-view token with tenant and user scope
+            approval_token = generate_match_approval_token(
+                settings.secret_key,
+                tenant_id=tenant.id,
+                user_id=user.id,
+                match_id=pm.id,
+                matched_santim=pm.matched_santim,
+                invoice_amount_santim=target_inv.amount_santim,
+                payment_amount_santim=pl.amount_santim,
+                match_state=pm.state,
+            )
+
+            # Query up to 2 alternative open candidate invoices
+            alt_rows = session.execute(
+                select(Invoice)
+                .where(
+                    Invoice.tenant_id == tenant.id,
+                    Invoice.state.in_([InvoiceState.OPEN.value, InvoiceState.PARTIALLY_PAID.value]),
+                    Invoice.id != target_inv.id,
+                )
+                .order_by(
+                    case((Invoice.retailer_id == target_inv.retailer_id, 0), else_=1).asc(),
+                    func.abs(Invoice.amount_santim - pl.amount_santim).asc(),
+                    Invoice.issued_date.desc(),
+                )
+                .limit(2)
+            ).scalars().all()
+
+            for alt_inv in alt_rows:
+                alt_ret_name = alt_inv.retailer.name if alt_inv.retailer else "Unknown"
+                alt_candidates.append({
+                    "invoice_number": alt_inv.invoice_number,
+                    "retailer_name": alt_ret_name,
+                    "amount_etb": to_etb(alt_inv.amount_santim),
+                    "due_date": alt_inv.due_date.strftime("%d %b %Y"),
+                })
+
+            # Plain-language "Why it matched" built from structured fields (No AI)
+            ret_display = target_inv.retailer.name if target_inv.retailer else "Unknown"
+            if pm.tier == "tier_a":
+                reason = f"Tier A exact match: invoice number '{target_inv.invoice_number}' matched in payment reference with equal amount"
+            elif pm.tier == "tier_b":
+                reason = f"Tier B match: counterparty phone/account or invoice token matched for retailer '{ret_display}' within date window"
+            else:
+                reason = f"Tier C match: candidate open invoice for retailer '{ret_display}' based on name normalization and amount similarity"
         elif pl.state == "proposed":
-            reason = "Awaiting verification"
+            reason = "Awaiting verification against open invoices"
 
         proposed_items.append({
             "payment_id": str(pl.id),
             "match_id": match_id,
             "amount_etb": to_etb(pl.amount_santim),
+            "amount_santim": pl.amount_santim,
             "value_date": pl.value_date.strftime("%d %b %Y"),
             "evidence_level": pl.evidence_level,
             "counterparty_name": pl.counterparty_name,
             "counterparty_account": pl.counterparty_account,
             "raw_reference": pl.raw_reference,
             "target_invoice_numbers": target_invs,
+            "target_invoice": target_inv,
+            "invoice_amount_etb": to_etb(target_inv.amount_santim) if target_inv else "0.00",
+            "invoice_issued_date": target_inv.issued_date.strftime("%d %b %Y") if target_inv and target_inv.issued_date else "N/A",
+            "invoice_due_date": target_inv.due_date.strftime("%d %b %Y") if target_inv else "N/A",
+            "retailer_name": target_inv.retailer.name if target_inv and target_inv.retailer else (pl.counterparty_name or "Unknown"),
+            "retailer_phone": target_inv.retailer.phone if target_inv and target_inv.retailer else "N/A",
             "reason": reason,
             "is_ambiguous": is_ambiguous,
+            "is_differing": is_differing,
+            "diff_etb": diff_etb,
+            "match_kind": match_kind,
+            "unallocated_credit_etb": unallocated_credit_etb,
+            "unallocated_credit_santim": unallocated_credit_santim,
+            "approval_token": approval_token,
+            "alternative_candidates": alt_candidates,
+            "is_previously_reversed": getattr(pl, "is_previously_reversed", False),
+            "relied_on_l3": (pl.evidence_level == "L3"),
         })
 
     csrf_token = generate_csrf_token(session_rec.id, settings.secret_key)
@@ -615,8 +729,29 @@ def dashboard(
             "proposed_items": proposed_items,
             "message": msg,
             "csrf_token": csrf_token,
+            "is_demo": getattr(tenant, "is_demo", False),
         },
     )
+
+
+@router.post("/demo/reset")
+def handle_demo_reset(
+    session: Session = Depends(get_session),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+    _csrf: None = Depends(verify_csrf),
+):
+    """Safely reset a demo tenant back to baseline state."""
+    from app.demo.reset import reset_demo_tenant
+
+    tenant, user = owner_context
+    if not getattr(tenant, "is_demo", False):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot reset a non-demo tenant.",
+        )
+
+    reset_demo_tenant(session, tenant.id)
+    return RedirectResponse("/?msg=Demo+data+successfully+reset+to+baseline", status_code=status.HTTP_303_SEE_OTHER)
 
 
 # ---------------------------------------------------------------------------
@@ -769,6 +904,10 @@ async def upload_statement(
 
     for pl in payment_lines:
         res = matcher.match_payment(pl, open_invoices, retailers)
+        # Previously reversed payments can never auto-confirm
+        if getattr(pl, "is_previously_reversed", False) and res.status == "auto_confirmed":
+            res.status = "proposed"
+            res.reason += " (demoted to review queue: previously reversed payment)"
         matcher.apply_match_results(session, pl, res, actor_id=user.id)
         if res.status == "auto_confirmed":
             auto_count += 1
@@ -790,6 +929,8 @@ async def upload_statement(
 @router.post("/matches/{match_id}/approve")
 def approve_match(
     match_id: str,
+    approval_token: str = Form(""),
+    confirm_differing: bool = Form(False),
     session: Session = Depends(get_session),
     owner_context: tuple[Tenant, User] = Depends(require_owner),
     _csrf: None = Depends(verify_csrf),
@@ -812,9 +953,41 @@ def approve_match(
     if not pm:
         raise HTTPException(status_code=404, detail="Match not found")
 
-    # Idempotency: if already confirmed, return success immediately
-    if pm.state == MatchState.CONFIRMED.value:
-        return HTMLResponse("<div class='p-3 text-xs font-bold text-emerald-800 bg-emerald-50 rounded-lg'>✓ Match Confirmed</div>")
+    # Check idempotent retry table and state guards
+    if approval_token:
+        tok_hash = hash_approval_token(approval_token)
+        processed_tok = session.execute(
+            select(ProcessedApprovalToken)
+            .where(
+                ProcessedApprovalToken.tenant_id == tenant.id,
+                ProcessedApprovalToken.token_hash == tok_hash,
+                ProcessedApprovalToken.payment_match_id == pm.id,
+            )
+        ).scalar_one_or_none()
+
+        # Exact retry returns original success immediately
+        if processed_tok and pm.state == MatchState.CONFIRMED.value:
+            return HTMLResponse("<div class='p-3 text-xs font-bold text-emerald-800 bg-emerald-50 rounded-lg'>✓ Match Confirmed</div>")
+
+        # Different token on already confirmed match or reversed match -> 409
+        if pm.state == MatchState.CONFIRMED.value:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Match is already confirmed.",
+            )
+        if pm.state == MatchState.REVERSED.value:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A reversed match can never be re-approved.",
+            )
+    else:
+        if pm.state == MatchState.REVERSED.value:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A reversed match can never be re-approved.",
+            )
+        if pm.state == MatchState.CONFIRMED.value:
+            return HTMLResponse("<div class='p-3 text-xs font-bold text-emerald-800 bg-emerald-50 rounded-lg'>✓ Match Confirmed</div>")
 
     # 2. Lock PaymentLine in consistent order (SEC-02)
     pl = session.execute(
@@ -830,8 +1003,34 @@ def approve_match(
     except InsufficientEvidenceError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    # Check cumulative confirmed allocations on payment line
-    allocated_santim = session.execute(
+    # 3. Lock Invoice in consistent order (SEC-02)
+    inv = session.execute(
+        select(Invoice)
+        .where(Invoice.id == pm.invoice_id, Invoice.tenant_id == tenant.id)
+        .with_for_update()
+    ).scalar_one()
+
+    # Verify HMAC-signed stale-view token if provided (scope, 30m expiry, amounts parity)
+    if approval_token:
+        is_valid, err_msg = verify_match_approval_token(
+            settings.secret_key,
+            approval_token,
+            expected_tenant_id=tenant.id,
+            expected_user_id=user.id,
+            expected_match_id=pm.id,
+            current_matched_santim=pm.matched_santim,
+            current_invoice_amount_santim=inv.amount_santim,
+            current_payment_amount_santim=pl.amount_santim,
+            current_match_state=pm.state,
+        )
+        if not is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Stale view or invalid token: {err_msg}",
+            )
+
+    # Compute allocations and open balance strictly inside locked transaction
+    prior_pl_allocated = session.execute(
         select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
         .where(
             PaymentMatch.payment_line_id == pl.id,
@@ -840,18 +1039,12 @@ def approve_match(
         )
     ).scalar_one()
 
-    if allocated_santim + pm.matched_santim > pl.amount_santim:
+    total_confirmed_allocations = int(prior_pl_allocated) + int(pm.matched_santim)
+    if total_confirmed_allocations > pl.amount_santim:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Payment line is already confirmed or fully allocated ({allocated_santim}/{pl.amount_santim} santim).",
+            detail=f"Payment line is already confirmed or fully allocated ({prior_pl_allocated}/{pl.amount_santim} santim).",
         )
-
-    # 3. Lock Invoice in consistent order (SEC-02)
-    inv = session.execute(
-        select(Invoice)
-        .where(Invoice.id == pm.invoice_id, Invoice.tenant_id == tenant.id)
-        .with_for_update()
-    ).scalar_one()
 
     inv_paid = session.execute(
         select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
@@ -862,10 +1055,20 @@ def approve_match(
         )
     ).scalar_one()
 
-    if inv_paid >= inv.amount_santim:
+    if int(inv_paid) >= inv.amount_santim:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Invoice {inv.invoice_number} is already fully settled ({inv_paid}/{inv.amount_santim} santim).",
+        )
+
+    open_balance = max(0, int(inv.amount_santim) - int(inv_paid))
+
+    # Differing amount check: matched portion != open balance OR payment line total != matched portion
+    is_differing = (int(pm.matched_santim) != int(open_balance)) or (int(pl.amount_santim) != int(pm.matched_santim))
+    if is_differing and not confirm_differing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Amounts differ (Match: {to_etb(int(pm.matched_santim))} ETB, Invoice Open: {to_etb(int(open_balance))} ETB, Payment: {to_etb(int(pl.amount_santim))} ETB). Explicit confirmation required.",
         )
 
     now = datetime.now(timezone.utc)
@@ -873,20 +1076,185 @@ def approve_match(
     pm.confirmed_by = user.id
     pm.confirmed_at = now
 
-    if allocated_santim + pm.matched_santim >= pl.amount_santim:
+    if total_confirmed_allocations >= pl.amount_santim:
         pl.state = PaymentState.CONFIRMED.value
     else:
-        pl.state = PaymentState.PARTIALLY_MATCHED.value
+        pl.state = PaymentState.PROPOSED.value
 
     # Update invoice state
-    new_inv_paid = inv_paid + pm.matched_santim
+    new_inv_paid = int(inv_paid) + pm.matched_santim
     if new_inv_paid >= inv.amount_santim:
         inv.state = InvoiceState.SETTLED.value
     else:
         inv.state = InvoiceState.PARTIALLY_PAID.value
 
+    # Track processed token in idempotent table
+    if approval_token:
+        session.add(
+            ProcessedApprovalToken(
+                tenant_id=tenant.id,
+                token_hash=hash_approval_token(approval_token),
+                actor_id=user.id,
+                payment_match_id=pm.id,
+                result_status="confirmed",
+            )
+        )
+
+    # Append immutable event
+    append_event(
+        session,
+        tenant_id=tenant.id,
+        event_type="match.web_confirmed",
+        aggregate_type="payment_match",
+        aggregate_id=pm.id,
+        actor_id=user.id,
+        payload={
+            "invoice_id": str(inv.id),
+            "matched_santim": pm.matched_santim,
+            "is_differing": is_differing,
+        },
+    )
+
     session.commit()
     return HTMLResponse("<div class='p-3 text-xs font-bold text-emerald-800 bg-emerald-50 rounded-lg'>✓ Match Confirmed</div>")
+
+
+@router.post("/matches/{match_id}/reverse")
+def reverse_match(
+    match_id: str,
+    reason_code: str = Form(...),
+    notes: str | None = Form(None),
+    session: Session = Depends(get_session),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+    _csrf: None = Depends(verify_csrf),
+):
+    """
+    Owner reversal of a confirmed match.
+    Enforces required reason code, logs compensating event (never UPDATE or DELETE on events),
+    stores free-text in separate notes table, and restores open balances.
+    """
+    tenant, user = owner_context
+    set_tenant(session, tenant.id)
+
+    try:
+        mid = uuid.UUID(match_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid match ID")
+
+    # Validate reason code
+    valid_codes = [c.value for c in ReversalReasonCode]
+    if reason_code not in valid_codes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid reversal reason code '{reason_code}'. Must be one of: {valid_codes}",
+        )
+
+    # 1. Lock PaymentMatch in consistent order
+    pm = session.execute(
+        select(PaymentMatch)
+        .where(PaymentMatch.id == mid, PaymentMatch.tenant_id == tenant.id)
+        .with_for_update()
+    ).scalar_one_or_none()
+
+    if not pm:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    if pm.state == MatchState.REVERSED.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Match has already been reversed. Cannot reverse twice.",
+        )
+
+    if pm.state != MatchState.CONFIRMED.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only confirmed matches can be reversed.",
+        )
+
+    # 2. Lock PaymentLine in consistent order
+    pl = session.execute(
+        select(PaymentLine)
+        .where(PaymentLine.id == pm.payment_line_id, PaymentLine.tenant_id == tenant.id)
+        .with_for_update()
+    ).scalar_one()
+
+    # 3. Lock Invoice in consistent order
+    inv = session.execute(
+        select(Invoice)
+        .where(Invoice.id == pm.invoice_id, Invoice.tenant_id == tenant.id)
+        .with_for_update()
+    ).scalar_one()
+
+    # Transition match to reversed
+    pm.state = MatchState.REVERSED.value
+
+    # Update payment line: flag as previously reversed and return to review queue
+    pl.is_previously_reversed = True
+
+    # Recheck remaining confirmed allocations for payment line
+    rem_pl_confirmed = session.execute(
+        select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
+        .where(
+            PaymentMatch.payment_line_id == pl.id,
+            PaymentMatch.state == MatchState.CONFIRMED.value,
+        )
+    ).scalar_one()
+
+    if rem_pl_confirmed >= pl.amount_santim:
+        pl.state = PaymentState.CONFIRMED.value
+    else:
+        pl.state = PaymentState.PROPOSED.value
+
+    # Recheck remaining confirmed payments for invoice
+    rem_inv_confirmed = session.execute(
+        select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
+        .where(
+            PaymentMatch.invoice_id == inv.id,
+            PaymentMatch.state == MatchState.CONFIRMED.value,
+        )
+    ).scalar_one()
+
+    if rem_inv_confirmed == 0:
+        inv.state = InvoiceState.OPEN.value
+    elif rem_inv_confirmed < inv.amount_santim:
+        inv.state = InvoiceState.PARTIALLY_PAID.value
+    else:
+        inv.state = InvoiceState.SETTLED.value
+
+    # Append compensating event to immutable log (Never UPDATE/DELETE on events)
+    append_event(
+        session,
+        tenant_id=tenant.id,
+        event_type="match.reversed",
+        aggregate_type="payment_match",
+        aggregate_id=pm.id,
+        actor_id=user.id,
+        payload={
+            "reason_code": reason_code,
+            "reversed_santim": pm.matched_santim,
+            "invoice_id": str(inv.id),
+            "payment_line_id": str(pl.id),
+            "relied_on_l3": (pl.evidence_level == "L3"),
+        },
+    )
+
+    # Free-text notes stored in separate deletable notes table (no personal data in events)
+    if notes and notes.strip():
+        rev_note = ReversalNote(
+            tenant_id=tenant.id,
+            payment_match_id=pm.id,
+            reason_code=reason_code,
+            notes=notes.strip(),
+            created_by=user.id,
+        )
+        session.add(rev_note)
+
+    session.commit()
+    return HTMLResponse(
+        "<div class='p-3 text-xs font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg'>"
+        "✓ Match Reversed. Balances and audit trail restored."
+        "</div>"
+    )
 
 
 @router.post("/matches/{match_id}/mark-unverified")

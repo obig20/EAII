@@ -1,78 +1,160 @@
-<div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-  <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+<div class="card">
+  <div class="card-header">
     <div>
-      <h3 class="font-bold text-slate-900 text-lg">Daily Close Step 3: Proposed Matches (Review Queue)</h3>
-      <p class="text-xs text-slate-500">Requires owner or cashier review. Partial, combined, ambiguous, or L4 items.</p>
+      <h3 class="card-title">Daily Close Step 3: Proposed Matches (Review Queue)</h3>
+      <p style="font-size: 0.75rem; color: var(--text-muted);">
+        Owner-only reconciliation review. Approvals are strictly one at a time.
+      </p>
     </div>
-    <span class="px-3 py-1 bg-amber-100 text-amber-800 font-bold rounded-full text-xs">
+    <span class="badge badge-warning">
       {{ proposed_items|length }} Pending Items
     </span>
   </div>
 
-  <div class="divide-y divide-slate-100">
+  <div style="divide-y: 1px solid var(--border);">
     {% for item in proposed_items %}
-    <div class="p-6 hover:bg-slate-50/50 transition flex flex-col md:flex-row justify-between items-start md:items-center gap-4" id="match-card-{{ item.match_id or item.payment_id }}">
-      <div class="space-y-1.5 flex-1">
-        <div class="flex items-center space-x-2">
-          <span class="px-2 py-0.5 rounded text-xs font-bold {% if item.evidence_level == 'L4' %}bg-purple-100 text-purple-800 border border-purple-200{% else %}bg-blue-100 text-blue-800 border border-blue-200{% endif %}">
-            Evidence: {{ item.evidence_level }}
-          </span>
-          <span class="font-black text-slate-900 text-lg">{{ item.amount_etb }}</span>
-          <span class="text-xs text-slate-400">· Value Date: {{ item.value_date }}</span>
-          {% if item.is_ambiguous %}
-          <span class="px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-700">Ambiguous Collision</span>
+    <div class="match-card" id="match-card-{{ item.match_id or item.payment_id }}" style="padding: 1.25rem; border-bottom: 1px solid var(--border);">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap;">
+        
+        <!-- Left: Match Details -->
+        <div style="flex: 1; min-width: 280px;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap;">
+            <span class="badge {% if item.evidence_level == 'L4' %}badge-l4{% else %}badge-l1{% endif %}">
+              Evidence: {{ item.evidence_level }}
+            </span>
+            <span style="font-size: 1.15rem; font-weight: 800; color: var(--primary);">
+              {{ item.amount_etb }}
+            </span>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">
+              Value Date: {{ item.value_date }}
+            </span>
+            {% if item.is_previously_reversed %}
+            <span class="badge badge-warning">Previously Reversed</span>
+            {% endif %}
+            {% if item.relied_on_l3 %}
+            <span class="badge badge-warning">⚠️ Relied on L3 Retailer Confirmation</span>
+            {% endif %}
+          </div>
+
+          <div style="font-size: 0.85rem; margin-bottom: 0.25rem;">
+            Retailer: <strong>{{ item.retailer_name }}</strong>
+            {% if item.retailer_phone and item.retailer_phone != 'N/A' %}
+            · Phone: <code>{{ item.retailer_phone }}</code>
+            {% endif %}
+            {% if item.counterparty_account %}
+            · Account: <code>{{ item.counterparty_account }}</code>
+            {% endif %}
+          </div>
+
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.35rem;">
+            Target Invoice: <strong>{{ item.target_invoice_numbers }}</strong>
+            {% if item.target_invoice %}
+            (Amount: <strong>{{ item.invoice_amount_etb }}</strong>, Issued: {{ item.invoice_issued_date }}, Due: {{ item.invoice_due_date }})
+            {% endif %}
+          </div>
+
+          <div style="font-size: 0.75rem; font-style: italic; color: var(--text-muted); margin-bottom: 0.5rem;">
+            Raw Reference: "{{ item.raw_reference or 'None' }}"
+          </div>
+
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.375rem; padding: 0.4rem 0.65rem; font-size: 0.75rem; color: #334155; margin-bottom: 0.5rem;">
+            💡 <strong>Why it matched:</strong> {{ item.reason }}
+          </div>
+
+          <!-- Differing Amount Warning -->
+          {% if item.is_differing %}
+          <div class="diff-warning">
+            ⚠️ Amounts differ by {{ item.diff_etb }} ({{ item.match_kind|capitalize }})
+            {% if item.unallocated_credit_santim > 0 %}
+            <div style="font-size: 0.75rem; margin-top: 0.25rem; font-weight: normal;">
+              Unallocated Credit Remainder: <strong>{{ item.unallocated_credit_etb }}</strong> (tracked on retailer, never auto-applied).
+            </div>
+            {% endif %}
+          </div>
+          {% endif %}
+
+          <!-- Alternative Candidate Invoices -->
+          {% if item.alternative_candidates and item.alternative_candidates|length > 0 %}
+          <div class="alt-candidates">
+            <strong>Alternative Open Invoices (Same Tenant):</strong>
+            <ul style="margin-left: 1.2rem; margin-top: 0.25rem; list-style-type: disc;">
+              {% for alt in item.alternative_candidates %}
+              <li>
+                <strong>{{ alt.invoice_number }}</strong> — {{ alt.retailer_name }} ({{ alt.amount_etb }} ETB, Due: {{ alt.due_date }})
+              </li>
+              {% endfor %}
+            </ul>
+          </div>
           {% endif %}
         </div>
 
-        <div class="text-sm font-medium text-slate-700">
-          Counterparty: <strong class="text-slate-900">{{ item.counterparty_name or 'Unknown' }}</strong>
-          {% if item.counterparty_account %} · Account: <code>{{ item.counterparty_account }}</code>{% endif %}
+        <!-- Right: Action Controls (Owner Only) -->
+        <div style="min-width: 220px; display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-end;">
+          {% if user_role == 'owner' %}
+            {% if item.evidence_level in ['L1', 'L2', 'L3'] %}
+              <form method="POST" action="/matches/{{ item.match_id }}/approve" style="width: 100%;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="approval_token" value="{{ item.approval_token }}">
+                
+                {% if item.is_differing %}
+                <label style="display: block; font-size: 0.75rem; font-weight: bold; color: var(--danger); margin-bottom: 0.4rem;">
+                  <input type="checkbox" name="confirm_differing" value="true" required>
+                  Amounts differ by {{ item.diff_etb }} ETB — Confirm
+                </label>
+                {% endif %}
+
+                <button
+                  type="submit"
+                  hx-post="/matches/{{ item.match_id }}/approve"
+                  hx-target="#match-card-{{ item.match_id }}"
+                  hx-swap="outerHTML"
+                  class="btn btn-success"
+                  style="width: 100%;">
+                  ✓ Confirm Match
+                </button>
+              </form>
+            {% elif item.evidence_level == 'L4' %}
+              <form method="POST" action="/matches/{{ item.match_id or item.payment_id }}/mark-unverified" style="width: 100%;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button
+                  type="submit"
+                  hx-post="/matches/{{ item.match_id or item.payment_id }}/mark-unverified"
+                  hx-target="#match-card-{{ item.match_id or item.payment_id }}"
+                  hx-swap="outerHTML"
+                  class="btn btn-primary"
+                  style="width: 100%;"
+                  title="Owner override: Marks as accepted unverified. Never counted as paid in totals.">
+                  Accept Unverified (L4)
+                </button>
+              </form>
+            {% endif %}
+
+            <form method="POST" action="/matches/{{ item.match_id or item.payment_id }}/reject" style="width: 100%;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button
+                type="submit"
+                hx-post="/matches/{{ item.match_id or item.payment_id }}/reject"
+                hx-target="#match-card-{{ item.match_id or item.payment_id }}"
+                hx-swap="outerHTML"
+                class="btn btn-secondary"
+                style="width: 100%;">
+                ✕ Reject Match
+              </button>
+            </form>
+          {% else %}
+            <div style="font-size: 0.75rem; color: var(--text-muted); background: #f1f5f9; padding: 0.5rem; border-radius: 0.375rem; text-align: center; width: 100%;">
+              🔒 Owner review required
+            </div>
+          {% endif %}
         </div>
 
-        <div class="text-xs text-slate-500 italic">
-          Raw Reference: "{{ item.raw_reference or 'None' }}"
-        </div>
-
-        <div class="text-xs bg-amber-50 text-amber-900 border border-amber-200 rounded px-3 py-1.5 font-medium inline-block">
-          Proposed for: <strong>{{ item.target_invoice_numbers }}</strong> · Reason: {{ item.reason }}
-        </div>
-      </div>
-
-      <!-- Action Buttons -->
-      <div class="flex items-center space-x-2 shrink-0">
-        {% if item.evidence_level in ['L1', 'L2', 'L3'] %}
-        <button
-          hx-post="/matches/{{ item.match_id }}/approve"
-          hx-target="#match-card-{{ item.match_id }}"
-          hx-swap="outerHTML"
-          class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3.5 py-2 rounded-lg shadow-sm transition">
-          Confirm Match
-        </button>
-        {% elif user_role == 'owner' and item.evidence_level == 'L4' %}
-        <button
-          hx-post="/matches/{{ item.match_id or item.payment_id }}/mark-unverified"
-          hx-target="#match-card-{{ item.match_id or item.payment_id }}"
-          hx-swap="outerHTML"
-          class="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-3 py-2 rounded-lg shadow-sm transition"
-          title="Owner override: Marks as accepted unverified. Never counted as paid in totals.">
-          Accept Unverified (L4)
-        </button>
-        {% endif %}
-
-        <button
-          hx-post="/matches/{{ item.match_id or item.payment_id }}/reject"
-          hx-target="#match-card-{{ item.match_id or item.payment_id }}"
-          hx-swap="outerHTML"
-          class="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-semibold px-3 py-2 rounded-lg transition">
-          Reject
-        </button>
       </div>
     </div>
     {% else %}
-    <div class="p-8 text-center text-slate-400">
-      <div class="text-2xl mb-1">🎉</div>
-      <div class="font-medium text-slate-600">Review queue is completely clear!</div>
-      <div class="text-xs text-slate-400">All statement lines and credit payments have been verified.</div>
+    <div style="padding: 2.5rem; text-align: center; color: var(--text-muted);">
+      <div style="font-size: 2rem; margin-bottom: 0.5rem;">🎉</div>
+      <div style="font-weight: 700; color: var(--primary);">Review queue is completely clear!</div>
+      <div style="font-size: 0.8rem;">All statement entries and credit payments have been verified.</div>
     </div>
     {% endfor %}
   </div>

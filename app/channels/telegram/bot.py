@@ -33,7 +33,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     Message,
 )
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.channels.telegram.auth import (
@@ -52,8 +52,10 @@ from app.kernel.guards import InsufficientEvidenceError, assert_confirmable
 from app.kernel.models import ImportBatch, Invoice, PaymentLine, PaymentMatch, Retailer, User
 from app.kernel.money import to_etb
 from app.kernel.tenant import set_tenant
+from app.kernel.tokens import generate_telegram_match_token, verify_telegram_match_token
 from app.reports.aging import generate_aging_report
 from app.reports.morning_brief import generate_morning_brief_text
+from app.settings import settings
 
 # Session factory hook (allows test suite to bind transactional test session)
 get_session_scope = session_scope
@@ -61,16 +63,33 @@ get_session_scope = session_scope
 router = Router(name="daily_close_telegram")
 
 
-def get_review_keyboard(match_id: uuid.UUID) -> InlineKeyboardMarkup:
+def get_review_keyboard(
+    match_id: uuid.UUID,
+    is_differing: bool = False,
+    diff_etb: str = "0.00",
+) -> InlineKeyboardMarkup:
     """Build inline keyboard for reviewing a proposed payment match."""
+    mid_hex = match_id.hex
+    tok8 = generate_telegram_match_token(settings.secret_key, match_id)
+    if is_differing:
+        approve_button = InlineKeyboardButton(
+            text=f"⚠️ Confirm Differing ({diff_etb} ETB)",
+            callback_data=f"diff_prompt:{mid_hex}:{tok8}",
+        )
+    else:
+        approve_button = InlineKeyboardButton(
+            text="✓ Confirm (L1-L3)",
+            callback_data=f"approve:{mid_hex}:{tok8}",
+        )
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✓ Confirm (L1-L3)", callback_data=f"approve:{match_id}"),
-                InlineKeyboardButton(text="⚠️ Accept Unverified (Owner)", callback_data=f"unverified:{match_id}"),
+                approve_button,
+                InlineKeyboardButton(text="⚠️ Accept Unverified", callback_data=f"unverified:{mid_hex}:{tok8}"),
             ],
             [
-                InlineKeyboardButton(text="✕ Reject", callback_data=f"reject:{match_id}"),
+                InlineKeyboardButton(text="✕ Reject", callback_data=f"reject:{mid_hex}:{tok8}"),
             ],
         ]
     )
@@ -180,6 +199,89 @@ async def handle_aging(message: Message):
     await message.answer("\n".join(lines))
 
 
+@router.message(Command("demo"))
+async def handle_demo(message: Message):
+    tg_id = message.from_user.id
+    lang = get_user_language(tg_id)
+    user_name = message.from_user.full_name or "Prospect Owner"
+
+    with get_session_scope() as session:
+        user_info = get_user_by_telegram_id(session, tg_id)
+        if user_info:
+            tenant, user = user_info
+            if tenant.is_demo:
+                from app.demo.reset import reset_demo_tenant
+                reset_demo_tenant(session, tenant.id)
+                msg = (
+                    "🔄 <b>Demo Mode Active!</b>\n\n"
+                    "Your demo tenant data has been reset to baseline:\n"
+                    "• 12 Addis retailers (Mercato, Piassa, Bole)\n"
+                    "• 30 invoices across all 5 aging buckets\n"
+                    "• 9 imported payments ready for review.\n\n"
+                    "Use /review to review proposed matches, /brief for morning collection brief, or /reset_demo anytime."
+                )
+                await message.answer(msg, parse_mode="HTML")
+                return
+            else:
+                await message.answer(
+                    f"You are connected to live business '{tenant.name}'. To use demo mode, please use web demo or a separate account."
+                )
+                return
+
+        # If not linked to a demo tenant, create a demo tenant specifically linked to this Telegram user
+        from app.demo.generator import create_demo_tenant
+        tenant, user = create_demo_tenant(
+            session,
+            tenant_name=f"Addis Wholesale Demo ({user_name})",
+            owner_identifier=f"+251911{tg_id % 1000000:06d}",
+            owner_name=user_name,
+            owner_password="DemoPass1234!",
+        )
+        user.telegram_id = tg_id
+        session.commit()
+
+    welcome_demo = (
+        "✨ <b>Welcome to Daily Close Demo Mode!</b>\n"
+        "ዕለታዊ ሂሳብ ማጠቃለያ - የማሳያ ሁነታ\n\n"
+        "A realistic Addis Ababa wholesale business has been set up for you:\n"
+        "• <b>12 Retailers:</b> Mercato, Piassa, Bole, Kazanchis\n"
+        "• <b>30 Credit Invoices:</b> 15,000 to 450,000 ETB spread across all aging buckets\n"
+        "• <b>9 Bank Statement Lines:</b> 3 Auto-confirmed (Tier A), 2 Tier B phone/account matches, 1 Tier C fuzzy name match, 1 partial payment, 1 overpayment with credit remainder, and 1 L4 cash receipt note.\n\n"
+        "👉 Try these commands now:\n"
+        "• /brief — Instant morning overdue collection brief\n"
+        "• /review — Walk through the proposed payment matches\n"
+        "• /aging — View the complete debtor aging report\n"
+        "• /reset_demo — Reset the demo back to the beginning"
+    )
+    await message.answer(welcome_demo, parse_mode="HTML")
+
+
+@router.message(Command("reset_demo"))
+async def handle_reset_demo(message: Message):
+    tg_id = message.from_user.id
+    lang = get_user_language(tg_id)
+
+    with get_session_scope() as session:
+        user_info = get_user_by_telegram_id(session, tg_id)
+        if not user_info:
+            await message.answer("You are not currently in a demo tenant. Send /demo to start.")
+            return
+
+        tenant, user = user_info
+        if not tenant.is_demo:
+            await message.answer("Access denied: only demo tenants can be reset.")
+            return
+
+        from app.demo.reset import reset_demo_tenant
+        reset_demo_tenant(session, tenant.id)
+
+    await message.answer(
+        "↺ <b>Demo data successfully reset!</b>\n\n"
+        "All retailers, invoices, and review queue items are restored to fresh baseline.",
+        parse_mode="HTML",
+    )
+
+
 @router.message(Command("review"))
 async def handle_review(message: Message):
     tg_id = message.from_user.id
@@ -215,19 +317,88 @@ async def handle_review(message: Message):
         for pm in matches:
             pl = pm.payment_line
             inv = pm.invoice
-            kb = get_review_keyboard(pm.id)
+
+            # Compute invoice open balance
+            inv_confirmed_paid = session.execute(
+                select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
+                .where(
+                    PaymentMatch.invoice_id == inv.id,
+                    PaymentMatch.state == MatchState.CONFIRMED.value,
+                    PaymentMatch.id != pm.id,
+                )
+            ).scalar_one()
+            inv_open_balance = max(0, inv.amount_santim - inv_confirmed_paid)
+
+            # Pl total allocations
+            pl_total_matched = session.execute(
+                select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
+                .where(
+                    PaymentMatch.payment_line_id == pl.id,
+                    PaymentMatch.state.in_([MatchState.CONFIRMED.value, MatchState.PROPOSED.value]),
+                )
+            ).scalar_one()
+
+            is_differing = (pm.matched_santim != inv_open_balance) or (pl.amount_santim != pl_total_matched)
+            diff_santim = abs(pl.amount_santim - pm.matched_santim) if is_differing else 0
+            diff_etb = to_etb(diff_santim)
+
+            kb = get_review_keyboard(pm.id, is_differing=is_differing, diff_etb=diff_etb)
             ret_name = html.escape(inv.retailer.name if inv.retailer else "Unknown")
+            ret_phone = html.escape(inv.retailer.phone if inv.retailer and inv.retailer.phone else "N/A")
             inv_num = html.escape(inv.invoice_number)
             tier_str = html.escape(pm.tier.upper())
             ev_str = html.escape(str(pl.evidence_level))
             ref_str = html.escape(pl.raw_reference or pl.source_ref or "None")
+
+            # Query up to 2 alternative candidates
+            alt_rows = session.execute(
+                select(Invoice)
+                .where(
+                    Invoice.tenant_id == tenant.id,
+                    Invoice.state.in_([InvoiceState.OPEN.value, InvoiceState.PARTIALLY_PAID.value]),
+                    Invoice.id != inv.id,
+                )
+                .order_by(
+                    case((Invoice.retailer_id == inv.retailer_id, 0), else_=1).asc(),
+                    func.abs(Invoice.amount_santim - pl.amount_santim).asc(),
+                    Invoice.issued_date.desc(),
+                )
+                .limit(2)
+            ).scalars().all()
+
+            alt_text = ""
+            if alt_rows:
+                alt_lines = []
+                for a in alt_rows:
+                    a_name = html.escape(a.retailer.name if a.retailer else "Unknown")
+                    alt_lines.append(f"• <b>{html.escape(a.invoice_number)}</b> ({a_name}, {to_etb(a.amount_santim)} ETB)")
+                alt_text = "\n\n<b>Alternative Open Invoices:</b>\n" + "\n".join(alt_lines)
+
+            diff_banner = ""
+            if is_differing:
+                diff_banner = f"\n⚠️ <b>Warning: Amounts differ by {diff_etb} ETB</b>"
+                if pl.amount_santim > pm.matched_santim:
+                    unallocated_etb = to_etb(pl.amount_santim - pm.matched_santim)
+                    diff_banner += f"\n<i>Unallocated Credit: {unallocated_etb} ETB (tracked on retailer, never auto-applied)</i>"
+
+            reversed_banner = ""
+            if getattr(pl, "is_previously_reversed", False):
+                reversed_banner = "\n⚠️ <b>Notice: Previously Reversed Payment Line</b>"
+            if pl.evidence_level == "L3":
+                reversed_banner += "\n⚠️ <i>Relied on L3 Retailer Confirmation</i>"
+
             text_block = (
                 f"🔍 <b>Proposed Match ({tier_str})</b>\n"
-                f"Amount: <b>{to_etb(pm.matched_santim)}</b>\n"
+                f"Payment Amount: <b>{to_etb(pl.amount_santim)} ETB</b>\n"
+                f"Matched Portion: <b>{to_etb(pm.matched_santim)} ETB</b>\n"
+                f"Invoice Amount: <b>{to_etb(inv.amount_santim)} ETB</b> (Open: {to_etb(int(inv_open_balance))} ETB)\n"
                 f"Evidence: <code>{ev_str}</code> ({'Verified' if pl.evidence_level in ('L1','L2','L3') else 'Unverified L4'})\n"
-                f"Invoice: <b>{inv_num}</b> (Retailer: {ret_name})\n"
-                f"Payment Reference: {ref_str}\n"
-                f"Date: {pl.value_date.isoformat()}"
+                f"Invoice: <b>{inv_num}</b> (Retailer: {ret_name}, Phone: {ret_phone})\n"
+                f"Invoice Due: {inv.due_date.isoformat()} · Value Date: {pl.value_date.isoformat()}\n"
+                f"Payment Reference: {ref_str}"
+                f"{diff_banner}"
+                f"{reversed_banner}"
+                f"{alt_text}"
             )
             await message.answer(text_block, parse_mode="HTML", reply_markup=kb)
 
@@ -235,29 +406,55 @@ async def handle_review(message: Message):
 # ---------------------------------------------------------------------------
 # Callback Query Handlers (Inline Buttons)
 # ---------------------------------------------------------------------------
+@router.callback_query(F.data.startswith("diff_prompt:"))
+async def handle_diff_prompt_callback(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    match_id_str = parts[1]
+    tok8 = parts[2] if len(parts) > 2 else ""
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✓ Yes, Confirm Differing Match", callback_data=f"approve:{match_id_str}:{tok8}"),
+            ],
+            [
+                InlineKeyboardButton(text="✕ Cancel", callback_data=f"reject:{match_id_str}:{tok8}"),
+            ],
+        ]
+    )
+    await callback.message.edit_reply_markup(reply_markup=kb)
+    await callback.answer("Amounts differ! Click to confirm approval.", show_alert=True)
+
+
 @router.callback_query(F.data.startswith("approve:"))
 async def handle_approve_callback(callback: CallbackQuery):
-    match_id_str = callback.data.split(":")[1]
+    parts = callback.data.split(":")
+    match_id_str = parts[1]
+    tok8 = parts[2] if len(parts) > 2 else ""
     tg_id = callback.from_user.id
     lang = get_user_language(tg_id)
+
+    try:
+        mid = uuid.UUID(hex=match_id_str) if len(match_id_str) == 32 else uuid.UUID(match_id_str)
+    except ValueError:
+        await callback.answer("Invalid match ID", show_alert=True)
+        return
+
+    if tok8 and not verify_telegram_match_token(settings.secret_key, mid, tok8):
+        await callback.answer("Invalid or tampered button token.", show_alert=True)
+        return
 
     with get_session_scope() as session:
         user_info = get_user_by_telegram_id(session, tg_id)
         if not user_info:
             await callback.answer(t("ask_invite_code", lang), show_alert=True)
             return
+
         tenant, user = user_info
         if user.role != UserRole.OWNER.value:
             await callback.answer("Only owners can approve payment matches.", show_alert=True)
             return
 
         set_tenant(session, tenant.id)
-
-        try:
-            mid = uuid.UUID(match_id_str)
-        except ValueError:
-            await callback.answer("Invalid match ID", show_alert=True)
-            return
 
         # 1. Lock PaymentMatch in transaction (SEC-02 consistent lock order: match -> line -> invoice)
         pm = session.execute(
@@ -270,9 +467,19 @@ async def handle_approve_callback(callback: CallbackQuery):
             await callback.answer("Match not found", show_alert=True)
             return
 
+        # Guard: reversed match can never be re-approved
+        if pm.state == MatchState.REVERSED.value:
+            await callback.answer("A reversed match can never be re-approved.", show_alert=True)
+            return
+
         # Idempotency
         if pm.state == MatchState.CONFIRMED.value:
             await callback.answer("Already confirmed!", show_alert=True)
+            return
+
+        # Stale button rejection: state has changed from proposed
+        if pm.state != MatchState.PROPOSED.value:
+            await callback.answer("Match state has changed. Please refresh the review queue.", show_alert=True)
             return
 
         # 2. Lock PaymentLine in consistent order (SEC-02)
@@ -361,7 +568,7 @@ async def handle_unverified_callback(callback: CallbackQuery):
 
         set_tenant(session, tenant.id)
         try:
-            mid = uuid.UUID(match_id_str)
+            mid = uuid.UUID(hex=match_id_str) if len(match_id_str) == 32 else uuid.UUID(match_id_str)
         except ValueError:
             await callback.answer("Invalid match ID", show_alert=True)
             return
@@ -408,7 +615,7 @@ async def handle_reject_callback(callback: CallbackQuery):
         set_tenant(session, tenant.id)
 
         try:
-            mid = uuid.UUID(match_id_str)
+            mid = uuid.UUID(hex=match_id_str) if len(match_id_str) == 32 else uuid.UUID(match_id_str)
         except ValueError:
             await callback.answer("Invalid match ID", show_alert=True)
             return

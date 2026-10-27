@@ -146,12 +146,14 @@ class PaymentMatcher:
         ]
         if ref_text and settled_invoices:
             matched_settled = []
+            ref_clean_upper = ref_text.upper()
             for inv in settled_invoices:
                 inv_clean = inv.invoice_number.upper().strip()
-                escaped_num = re.escape(inv_clean)
-                pattern = rf"\b{escaped_num}\b"
-                if re.search(pattern, ref_text, re.IGNORECASE):
-                    matched_settled.append(inv)
+                if inv_clean in ref_clean_upper:
+                    escaped_num = re.escape(inv_clean)
+                    pattern = rf"\b{escaped_num}\b"
+                    if re.search(pattern, ref_clean_upper):
+                        matched_settled.append(inv)
             if matched_settled:
                 target_inv = matched_settled[0]
                 return MatchResult(
@@ -195,7 +197,7 @@ class PaymentMatcher:
 
                 if (inv_num_clean in ref_full_tokens) or (inv_digits in distinct_tokens_in_ref):
                     matched_invoices.append(inv)
-                elif ("INV" in ref_upper or "INVOICE" in ref_upper) and re.search(rf"\b{re.escape(inv_num_clean)}\b", ref_upper):
+                elif ("INV" in ref_upper or "INVOICE" in ref_upper) and (inv_num_clean in ref_upper) and re.search(rf"\b{re.escape(inv_num_clean)}\b", ref_upper):
                     matched_invoices.append(inv)
 
             if matched_invoices:
@@ -335,13 +337,14 @@ class PaymentMatcher:
         norm_cp_acc = normalize_account_number(payment.counterparty_account)
 
         matched_retailers: list[Retailer] = []
-        for ret in retailers:
-            phone_match = norm_cp_phone and (normalize_phone(ret.phone) == norm_cp_phone)
-            acc_match = norm_cp_acc and (
-                normalize_account_number(ret.bank_account) == norm_cp_acc
-            )
-            if phone_match or acc_match:
-                matched_retailers.append(ret)
+        if norm_cp_phone or norm_cp_acc:
+            for ret in retailers:
+                phone_match = norm_cp_phone and (normalize_phone(ret.phone) == norm_cp_phone)
+                acc_match = norm_cp_acc and (
+                    normalize_account_number(ret.bank_account) == norm_cp_acc
+                )
+                if phone_match or acc_match:
+                    matched_retailers.append(ret)
 
         if len(matched_retailers) == 1:
             ret = matched_retailers[0]

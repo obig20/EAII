@@ -57,6 +57,19 @@ class MatchState(str, Enum):
     PROPOSED = "proposed"
     CONFIRMED = "confirmed"
     REJECTED = "rejected"
+    REVERSED = "reversed"
+
+
+class ReversalReasonCode(str, Enum):
+    """
+    Structured reason code for payment match reversal.
+    Stored in append-only event payloads without personal data.
+    """
+    WRONG_INVOICE = "wrong_invoice"
+    WRONG_AMOUNT = "wrong_amount"
+    DUPLICATE = "duplicate"
+    BANK_REVERSAL = "bank_reversal"
+    OTHER = "other"
 
 
 class MatchTier(str, Enum):

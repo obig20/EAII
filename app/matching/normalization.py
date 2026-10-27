@@ -181,6 +181,7 @@ def normalize_ethiopian_name(name: str | None) -> str:
     return " ".join(final_tokens) if final_tokens else s.strip()
 
 
+@functools.lru_cache(maxsize=32768)
 def levenshtein_distance(s1: str, s2: str) -> int:
     """Standard Levenshtein edit distance."""
     if s1 == s2:
@@ -219,6 +220,7 @@ def string_similarity(s1: str, s2: str) -> float:
     # Token overlap check (Jaccard on tokens)
     tokens1 = set(n1.split())
     tokens2 = set(n2.split())
+    overlap = 0.0
     if tokens1 and tokens2:
         overlap = len(tokens1 & tokens2) / len(tokens1 | tokens2)
         if overlap == 1.0:
@@ -230,10 +232,14 @@ def string_similarity(s1: str, s2: str) -> float:
 
     # Levenshtein ratio
     max_len = max(len(n1), len(n2))
+    min_dist = abs(len(n1) - len(n2))
+    if max_len > 0 and (1.0 - (min_dist / max_len)) <= overlap:
+        return overlap
+
     dist = levenshtein_distance(n1, n2)
     lev_ratio = 1.0 - (dist / max_len)
 
-    return max(lev_ratio, overlap if "overlap" in locals() else 0.0)
+    return max(lev_ratio, overlap)
 
 
 # Common banking / transfer narrative noise words
@@ -307,7 +313,7 @@ def match_name_in_text(entity_name: str, narrative: str) -> float:
                 et == nt
                 or (len(et) >= 4 and nt.startswith(et[:4]))
                 or (len(nt) >= 4 and et.startswith(nt[:4]))
-                or levenshtein_distance(et, nt) <= 1
+                or (abs(len(et) - len(nt)) <= 1 and levenshtein_distance(et, nt) <= 1)
                 for nt in all_tokens
             ):
                 matched_count += 1

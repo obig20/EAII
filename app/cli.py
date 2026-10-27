@@ -224,6 +224,83 @@ def unlock_user(args: argparse.Namespace) -> int:
         return 0
 
 
+def cli_create_demo(args: argparse.Namespace) -> int:
+    """Create a realistic Addis Ababa wholesale demo tenant."""
+    from app.demo.generator import create_demo_tenant
+
+    tenant_name = args.tenant.strip()
+    identifier = args.identifier.strip()
+    display_name = args.name.strip()
+    password = args.password.strip()
+
+    with session_scope() as session:
+        tenant, owner = create_demo_tenant(
+            session,
+            tenant_name=tenant_name,
+            owner_identifier=identifier,
+            owner_name=display_name,
+            owner_password=password,
+        )
+        print(f"Successfully created Demo Wholesaler:")
+        print(f"  Tenant:       {tenant.name} ({tenant.id}) [is_demo=True]")
+        print(f"  Owner Login:  {identifier}")
+        print(f"  Password:     {password}")
+        print(f"  Demo Data:    12 retailers, 30 invoices across 5 aging buckets, 9 statement lines.")
+        return 0
+
+
+def cli_reset_demo(args: argparse.Namespace) -> int:
+    """Safely reset a demo tenant back to baseline data."""
+    from app.demo.reset import reset_demo_tenant
+
+    tenant_id_str = args.tenant_id.strip()
+    try:
+        tid = uuid.UUID(tenant_id_str)
+    except ValueError:
+        print("Error: Invalid tenant UUID format.", file=sys.stderr)
+        return 1
+
+    with session_scope() as session:
+        try:
+            reset_demo_tenant(session, tid)
+            print(f"Successfully reset Demo Tenant {tid} back to clean baseline state.")
+            return 0
+        except (PermissionError, ValueError) as err:
+            print(f"Error: {err}", file=sys.stderr)
+            return 1
+
+
+def cli_health_check(args: argparse.Namespace) -> int:
+    """Run Collections Health Check diagnostic on invoices and bank statements."""
+    from app.reports.health_check import FriendlyMappingError, run_health_check
+
+    try:
+        report_data = run_health_check(
+            invoices_path=args.invoices,
+            statements_paths=args.statements,
+            out_path=args.out,
+            lang=args.lang,
+            map_path=args.map,
+            keep=args.keep,
+        )
+        print("Collections Health Check completed successfully!")
+        print(f"  Report written to: {args.out}")
+        print(f"  Language:          {args.lang}")
+        print(f"  Invoices:          {report_data['meta']['total_invoices_count']}")
+        print(f"  Statement Lines:   {report_data['meta']['total_statement_lines_count']}")
+        print(f"  Outstanding Total: {report_data['aging']['grand_remaining_etb']}")
+        return 0
+    except FriendlyMappingError as err:
+        print(str(err), file=sys.stderr)
+        return 1
+    except (FileNotFoundError, ValueError) as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+    except Exception as err:
+        print(f"Error running health check: {err}", file=sys.stderr)
+        return 1
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Daily Close Admin CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -253,6 +330,29 @@ def main() -> None:
     p_unlock = subparsers.add_parser("unlock-user", help="Unlock a locked user account and reset failed login attempts")
     p_unlock.add_argument("--identifier", required=True, help="User email or phone (+251...)")
     p_unlock.set_defaults(func=unlock_user)
+
+    # create-demo
+    p_demo = subparsers.add_parser("create-demo", help="Create a realistic Addis Ababa wholesale demo tenant")
+    p_demo.add_argument("--tenant", default="Addis Wholesale Demo / አዲስ ጅምላ ማሳያ", help="Demo tenant name")
+    p_demo.add_argument("--identifier", default="demo@dailyclose.et", help="Owner login identifier")
+    p_demo.add_argument("--name", default="Ato Demo Owner", help="Owner display name")
+    p_demo.add_argument("--password", default="DemoDailyClose2026!", help="Owner password (min 10 chars)")
+    p_demo.set_defaults(func=cli_create_demo)
+
+    # reset-demo
+    p_reset = subparsers.add_parser("reset-demo", help="Safely reset a demo tenant back to baseline data")
+    p_reset.add_argument("--tenant-id", required=True, help="Demo Tenant UUID")
+    p_reset.set_defaults(func=cli_reset_demo)
+
+    # health-check
+    p_hc = subparsers.add_parser("health-check", help="Run Collections Health Check diagnostic")
+    p_hc.add_argument("--invoices", required=True, help="Path to credit sales / invoices CSV")
+    p_hc.add_argument("--statements", nargs="+", required=True, help="Path to one or more bank/mobile money statement files (CSV/XLSX)")
+    p_hc.add_argument("--out", default="report.html", help="Output path for self-contained HTML report (default: report.html)")
+    p_hc.add_argument("--lang", default="en", choices=["en", "am"], help="Report language: 'en' (English) or 'am' (Amharic) (default: en)")
+    p_hc.add_argument("--map", default=None, help="Optional JSON file for column mappings")
+    p_hc.add_argument("--keep", action="store_true", default=False, help="Keep the temporary tenant data instead of rolling back/deleting")
+    p_hc.set_defaults(func=cli_health_check)
 
 
     args = parser.parse_args()

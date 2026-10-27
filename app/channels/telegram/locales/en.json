@@ -15,5 +15,18 @@
   "l4_cannot_confirm": "✕ Rule 2 Violation: L4 screenshot evidence cannot be confirmed directly. The owner may mark it 'accepted_unverified' or match it with an imported bank statement line.",
   "morning_brief_header": "☀️ MORNING COLLECTIONS BRIEF — Addis Ababa (EAT)",
   "aging_header": "📊 ACCOUNTS RECEIVABLE AGING SUMMARY",
-  "help_text": "Daily Close Commands:\n• Quick Entry: 'INV381 | Retailer | Amount | due 30d'\n• Photo Upload: Send a receipt photo for L4 review\n• /brief: Morning collections brief\n• /aging: Receivables aging breakdown\n• /review: Pending match review queue\n• /lang [en|am]: Switch language"
+  "help_text": "Daily Close Commands:\n• Quick Entry: 'INV381 | Retailer | Amount | due 30d'\n• Photo Upload: Send a receipt photo for L4 review\n• /brief: Morning collections brief\n• /aging: Receivables aging breakdown\n• /review: Pending match review queue\n• /lang [en|am]: Switch language",
+  "wrong_invoice": "Wrong Invoice Selected",
+  "wrong_amount": "Wrong Allocation Amount",
+  "duplicate": "Duplicate Payment Match",
+  "bank_reversal": "Bank Transaction Reversal",
+  "other": "Other Administrative Reason",
+  "amounts_differ_warning": "⚠️ Amounts differ by {diff_etb} ETB ({match_kind})",
+  "confirm_differing_prompt": "Amounts differ by {diff_etb} ETB. Are you sure you want to approve?",
+  "cashier_cannot_approve": "Only owners can approve payment matches.",
+  "cashier_cannot_reverse": "Only owners can reverse payment matches.",
+  "match_reversed": "✓ Match reversed successfully. Balances restored.",
+  "previously_reversed_badge": "Previously Reversed",
+  "relied_on_l3_badge": "⚠️ Relied on L3 Retailer Confirmation",
+  "unallocated_credit": "Unallocated Credit: {amount_etb} ETB"
 }

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -32,9 +33,8 @@ def create_app() -> FastAPI:
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-            "font-src 'self' https://cdn.jsdelivr.net; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; "
             "connect-src 'self'; "
             "frame-ancestors 'none';"
@@ -53,6 +53,7 @@ def create_app() -> FastAPI:
                 content={"status": "unhealthy", "database": "disconnected"},
             )
 
+    app.mount("/static", StaticFiles(directory="app/channels/web/static"), name="static")
     app.include_router(web_router)
     return app
 
