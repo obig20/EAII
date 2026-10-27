@@ -75,6 +75,7 @@ class Tenant(Base):
     users: Mapped[list["User"]] = relationship(back_populates="tenant")
     retailers: Mapped[list["Retailer"]] = relationship(back_populates="tenant")
     invoices: Mapped[list["Invoice"]] = relationship(back_populates="tenant")
+    warehouses: Mapped[list["Warehouse"]] = relationship(back_populates="tenant")
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +303,9 @@ class Invoice(Base):
     payment_matches: Mapped[list["PaymentMatch"]] = relationship(
         back_populates="invoice"
     )
+    items: Mapped[list["InvoiceItem"]] = relationship(
+        back_populates="invoice"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -495,4 +499,186 @@ class ProcessedApprovalToken(Base):
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+
+
+# ---------------------------------------------------------------------------
+# ERP: warehouses
+# ---------------------------------------------------------------------------
+class Warehouse(Base):
+    __tablename__ = "warehouses"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "code", name="uq_warehouses_tenant_code"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    code: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    tenant: Mapped[Tenant] = relationship(back_populates="warehouses")
+    stock_levels: Mapped[list[StockLevel]] = relationship(back_populates="warehouse")
+
+
+# ---------------------------------------------------------------------------
+# ERP: product_categories
+# ---------------------------------------------------------------------------
+class ProductCategory(Base):
+    __tablename__ = "product_categories"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_product_categories_tenant_name"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    products: Mapped[list[Product]] = relationship(back_populates="category")
+
+
+# ---------------------------------------------------------------------------
+# ERP: products
+# ---------------------------------------------------------------------------
+class Product(Base):
+    __tablename__ = "products"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "sku", name="uq_products_tenant_sku"),
+        CheckConstraint("unit_price_santim >= 0", name="ck_product_unit_price_positive"),
+        CheckConstraint("cost_price_santim >= 0", name="ck_product_cost_price_positive"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    category_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("product_categories.id"), nullable=True, index=True
+    )
+    sku: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    unit_of_measure: Mapped[str] = mapped_column(String(32), nullable=False, default="pcs")
+    unit_price_santim: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    cost_price_santim: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    reorder_threshold: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    category: Mapped[ProductCategory | None] = relationship(back_populates="products")
+    stock_levels: Mapped[list[StockLevel]] = relationship(back_populates="product")
+
+
+# ---------------------------------------------------------------------------
+# ERP: stock_levels
+# ---------------------------------------------------------------------------
+class StockLevel(Base):
+    __tablename__ = "stock_levels"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "warehouse_id", "product_id", name="uq_stock_levels_wh_product"),
+        CheckConstraint("quantity_on_hand >= 0", name="ck_stock_qty_non_negative"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    warehouse_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("warehouses.id"), nullable=False, index=True
+    )
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("products.id"), nullable=False, index=True
+    )
+    quantity_on_hand: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    quantity_reserved: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    warehouse: Mapped[Warehouse] = relationship(back_populates="stock_levels")
+    product: Mapped[Product] = relationship(back_populates="stock_levels")
+
+
+# ---------------------------------------------------------------------------
+# ERP: stock_movements
+# ---------------------------------------------------------------------------
+class StockMovement(Base):
+    __tablename__ = "stock_movements"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_stock_movement_quantity_positive"),
+        CheckConstraint("unit_cost_santim >= 0", name="ck_stock_movement_unit_cost_non_negative"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    movement_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("products.id"), nullable=False, index=True
+    )
+    source_warehouse_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("warehouses.id"), nullable=True, index=True
+    )
+    destination_warehouse_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("warehouses.id"), nullable=True, index=True
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_cost_santim: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    reference: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+# ---------------------------------------------------------------------------
+# ERP: invoice_items (link between credit invoices and inventory products)
+# ---------------------------------------------------------------------------
+class InvoiceItem(Base):
+    __tablename__ = "invoice_items"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_invoice_item_quantity_positive"),
+        CheckConstraint("unit_price_santim >= 0", name="ck_invoice_item_unit_price_non_negative"),
+        CheckConstraint("total_price_santim >= 0", name="ck_invoice_item_total_price_non_negative"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    invoice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=False, index=True
+    )
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("products.id"), nullable=False, index=True
+    )
+    warehouse_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("warehouses.id"), nullable=True
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_price_santim: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    total_price_santim: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    invoice: Mapped[Invoice] = relationship(back_populates="items")
+    product: Mapped[Product] = relationship()
 

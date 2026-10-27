@@ -91,6 +91,15 @@ class UserRole(str, Enum):
     CASHIER = "cashier"
 
 
+class StockMovementType(str, Enum):
+    RECEIPT = "receipt"
+    DISPATCH_SALE = "dispatch_sale"
+    TRANSFER_IN = "transfer_in"
+    TRANSFER_OUT = "transfer_out"
+    DAMAGE_SHRINKAGE = "damage_shrinkage"
+    ADJUSTMENT = "adjustment"
+
+
 # ---------------------------------------------------------------------------
 # Evidence levels that are permitted to CONFIRM a payment.
 # This set is the authoritative source used by guards.py.
