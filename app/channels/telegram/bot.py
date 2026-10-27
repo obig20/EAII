@@ -17,6 +17,7 @@ Architectural Invariant:
 
 from __future__ import annotations
 
+import html
 import hmac
 import io
 import re
@@ -146,7 +147,7 @@ async def handle_brief(message: Message):
         set_tenant(session, tenant.id)
         brief_text = generate_morning_brief_text(session, tenant_id=tenant.id)
 
-    await message.answer(f"<code>{brief_text}</code>", parse_mode="HTML")
+    await message.answer(f"<code>{html.escape(brief_text)}</code>", parse_mode="HTML")
 
 
 @router.message(Command("aging"))
@@ -215,12 +216,17 @@ async def handle_review(message: Message):
             pl = pm.payment_line
             inv = pm.invoice
             kb = get_review_keyboard(pm.id)
+            ret_name = html.escape(inv.retailer.name if inv.retailer else "Unknown")
+            inv_num = html.escape(inv.invoice_number)
+            tier_str = html.escape(pm.tier.upper())
+            ev_str = html.escape(str(pl.evidence_level))
+            ref_str = html.escape(pl.raw_reference or pl.source_ref or "None")
             text_block = (
-                f"🔍 <b>Proposed Match ({pm.tier.upper()})</b>\n"
+                f"🔍 <b>Proposed Match ({tier_str})</b>\n"
                 f"Amount: <b>{to_etb(pm.matched_santim)}</b>\n"
-                f"Evidence: <code>{pl.evidence_level}</code> ({'Verified' if pl.evidence_level in ('L1','L2','L3') else 'Unverified L4'})\n"
-                f"Invoice: <b>{inv.invoice_number}</b> (Retailer: {inv.retailer.name})\n"
-                f"Payment Reference: {pl.raw_reference or pl.source_ref or 'None'}\n"
+                f"Evidence: <code>{ev_str}</code> ({'Verified' if pl.evidence_level in ('L1','L2','L3') else 'Unverified L4'})\n"
+                f"Invoice: <b>{inv_num}</b> (Retailer: {ret_name})\n"
+                f"Payment Reference: {ref_str}\n"
                 f"Date: {pl.value_date.isoformat()}"
             )
             await message.answer(text_block, parse_mode="HTML", reply_markup=kb)

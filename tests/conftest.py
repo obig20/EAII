@@ -256,7 +256,7 @@ def client(db_session: Session):
         yield db_session
 
     app.dependency_overrides[get_session] = _override_get_session
-    with TestClient(app) as test_client:
+    with TestClient(app, client=("127.0.0.1", 50000)) as test_client:
         yield test_client
     app.dependency_overrides.clear()
 

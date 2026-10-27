@@ -16,6 +16,9 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
+import defusedxml.ElementTree as dET
+import defusedxml.common
+
 from app.importers.base import BaseImporter
 from app.importers.mapping import ColumnMappingConfig
 
@@ -26,6 +29,14 @@ def _col_letter_to_index(col_str: str) -> int:
     for char in col_str:
         idx = idx * 26 + (ord(char.upper()) - ord("A") + 1)
     return idx - 1
+
+
+def _safe_fromstring(xml_bytes: bytes) -> ET.Element:
+    """Safe XML parser using defusedxml (defends against XXE, billion laughs, DTD/entity expansion)."""
+    try:
+        return dET.fromstring(xml_bytes, forbid_dtd=True, forbid_entities=True)
+    except (defusedxml.common.DefusedXmlException, ET.ParseError, ValueError) as exc:
+        raise ValueError(f"Invalid XML in XLSX archive: {exc}") from exc
 
 
 def _parse_xlsx_pure_python(file_bytes_or_path: Any) -> list[dict[str, Any]]:
@@ -62,7 +73,7 @@ def _parse_xlsx_pure_python(file_bytes_or_path: Any) -> list[dict[str, Any]]:
         # 1. Parse shared strings if present
         shared_strings: list[str] = []
         if "xl/sharedStrings.xml" in z.namelist():
-            tree = ET.fromstring(z.read("xl/sharedStrings.xml"))
+            tree = _safe_fromstring(z.read("xl/sharedStrings.xml"))
             # Namespace handling
             ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
             for si in tree.findall(".//s:si", ns) or tree.findall(".//si"):
@@ -81,7 +92,7 @@ def _parse_xlsx_pure_python(file_bytes_or_path: Any) -> list[dict[str, Any]]:
         if not sheet_name:
             return []
 
-        sheet_tree = ET.fromstring(z.read(sheet_name))
+        sheet_tree = _safe_fromstring(z.read(sheet_name))
         ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 
         # Extract rows

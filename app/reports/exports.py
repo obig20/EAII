@@ -23,12 +23,47 @@ from app.kernel.models import Invoice, PaymentLine, PaymentMatch, Retailer
 from app.kernel.money import to_etb
 
 
+def sanitize_csv_cell(value: object) -> object:
+    """
+    Sanitize cell value to prevent CSV Formula Injection (CWE-1236).
+    If a string value starts with '=', '+', '-', '@', '\t', or '\r',
+    prepend a single quote (') unless it's a valid integer/decimal number
+    or an international phone number (e.g. +251911000000).
+    """
+    if not isinstance(value, str):
+        return value
+    if not value:
+        return value
+    first_char = value[0]
+    if first_char in ("=", "@", "\t", "\r"):
+        return "'" + value
+    if first_char == "+":
+        stripped = value[1:].strip()
+        cleaned = stripped.replace(" ", "").replace("-", "")
+        # Phone numbers: starts with + followed by 7-15 digits (e.g. +251911000000)
+        if cleaned.isdigit() and 7 <= len(cleaned) <= 15:
+            return value
+        # Positive numbers (e.g. +123.45)
+        if stripped.isdigit() or (stripped.replace(".", "", 1).isdigit() and stripped.count(".") <= 1):
+            return value
+        return "'" + value
+    if first_char == "-":
+        stripped = value[1:].strip()
+        if not (stripped.isdigit() or (stripped.replace(".", "", 1).isdigit() and stripped.count(".") <= 1)):
+            return "'" + value
+    return value
+
+
+def sanitize_csv_row(row: Sequence[object]) -> list[object]:
+    return [sanitize_csv_cell(c) for c in row]
+
+
 def export_sales_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
     """Generate CSV string of all sales invoices for this tenant."""
     output = io.StringIO()
     writer = csv.writer(output)
 
-    writer.writerow([
+    writer.writerow(sanitize_csv_row([
         "Invoice Number",
         "Retailer Name",
         "Retailer Phone",
@@ -41,7 +76,7 @@ def export_sales_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
         "Remaining Amount (Santim)",
         "Remaining Amount (ETB)",
         "State",
-    ])
+    ]))
 
     confirmed_paid_subquery = (
         select(
@@ -71,7 +106,7 @@ def export_sales_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
     for inv, ret, paid_santim in session.execute(stmt):
         paid_int = int(paid_santim or 0)
         rem_santim = max(0, int(inv.amount_santim) - paid_int)
-        writer.writerow([
+        writer.writerow(sanitize_csv_row([
             inv.invoice_number,
             ret.name,
             ret.phone or "",
@@ -84,7 +119,7 @@ def export_sales_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
             rem_santim,
             to_etb(rem_santim),
             inv.state,
-        ])
+        ]))
 
     return output.getvalue()
 
@@ -114,7 +149,7 @@ def export_payments_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
     )
 
     for pl in session.execute(stmt).scalars():
-        writer.writerow([
+        writer.writerow(sanitize_csv_row([
             str(pl.id),
             pl.value_date.isoformat(),
             pl.source_ref or "",
@@ -125,7 +160,7 @@ def export_payments_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
             pl.amount_santim,
             to_etb(pl.amount_santim),
             pl.state,
-        ])
+        ]))
 
     return output.getvalue()
 
@@ -185,7 +220,7 @@ def export_accountant_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
         rem_santim = max(0, int(inv.amount_santim) - paid_int)
         total_sales_santim += int(inv.amount_santim)
         total_paid_santim += paid_int
-        writer.writerow([
+        writer.writerow(sanitize_csv_row([
             inv.invoice_number,
             ret.name,
             inv.issued_date.isoformat(),
@@ -195,12 +230,12 @@ def export_accountant_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
             paid_int,
             rem_santim,
             inv.state,
-        ])
+        ]))
 
     writer.writerow([])
-    writer.writerow(["TOTAL SALES (SANTIM)", total_sales_santim, "TOTAL SALES (ETB)", to_etb(total_sales_santim)])
-    writer.writerow(["TOTAL PAID (SANTIM)", total_paid_santim, "TOTAL PAID (ETB)", to_etb(total_paid_santim)])
-    writer.writerow(["TOTAL OUTSTANDING (SANTIM)", total_sales_santim - total_paid_santim, "TOTAL OUTSTANDING (ETB)", to_etb(total_sales_santim - total_paid_santim)])
+    writer.writerow(sanitize_csv_row(["TOTAL SALES (SANTIM)", total_sales_santim, "TOTAL SALES (ETB)", to_etb(total_sales_santim)]))
+    writer.writerow(sanitize_csv_row(["TOTAL PAID (SANTIM)", total_paid_santim, "TOTAL PAID (ETB)", to_etb(total_paid_santim)]))
+    writer.writerow(sanitize_csv_row(["TOTAL OUTSTANDING (SANTIM)", total_sales_santim - total_paid_santim, "TOTAL OUTSTANDING (ETB)", to_etb(total_sales_santim - total_paid_santim)]))
     writer.writerow([])
 
     # SECTION 2: UNMATCHED & PROPOSED ITEMS (AUDIT QUEUE)
@@ -225,7 +260,7 @@ def export_accountant_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
     for pl in session.execute(audit_stmt).scalars():
         unmatched_count += 1
         unmatched_santim += pl.amount_santim
-        writer.writerow([
+        writer.writerow(sanitize_csv_row([
             str(pl.id),
             pl.value_date.isoformat(),
             pl.amount_santim,
@@ -234,9 +269,9 @@ def export_accountant_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
             pl.state,
             pl.counterparty_name or pl.counterparty_account or "",
             pl.raw_reference or "",
-        ])
+        ]))
 
     writer.writerow([])
-    writer.writerow(["TOTAL UNRESOLVED ITEMS", unmatched_count, "TOTAL UNRESOLVED SANTIM", unmatched_santim, "TOTAL UNRESOLVED ETB", to_etb(unmatched_santim)])
+    writer.writerow(sanitize_csv_row(["TOTAL UNRESOLVED ITEMS", unmatched_count, "TOTAL UNRESOLVED SANTIM", unmatched_santim, "TOTAL UNRESOLVED ETB", to_etb(unmatched_santim)]))
 
     return output.getvalue()

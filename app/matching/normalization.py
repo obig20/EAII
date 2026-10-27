@@ -11,6 +11,7 @@ Handles:
 
 from __future__ import annotations
 
+import functools
 import re
 import unicodedata
 
@@ -128,6 +129,7 @@ def normalize_account_number(raw_account: str | None) -> str | None:
     return cleaned if len(cleaned) >= 4 else None
 
 
+@functools.lru_cache(maxsize=8192)
 def normalize_ethiopian_name(name: str | None) -> str:
     """
     Normalize an Ethiopian personal or business name for robust comparison.
@@ -260,6 +262,7 @@ NARRATIVE_NOISE_WORDS = {
 }
 
 
+@functools.lru_cache(maxsize=8192)
 def clean_narrative_text(text: str | None) -> str:
     """Strip generic bank narrative words (e.g. 'Transfer from', 'Payment for')."""
     if not text:
@@ -269,6 +272,7 @@ def clean_narrative_text(text: str | None) -> str:
     return " ".join(tokens) if tokens else norm
 
 
+@functools.lru_cache(maxsize=16384)
 def match_name_in_text(entity_name: str, narrative: str) -> float:
     """
     Evaluate if an entity name appears in a bank transaction narrative.

@@ -183,8 +183,12 @@ def parse_and_record_sales_csv(
     Returns: (created_invoices, sequence_gaps, errors)
     """
     if isinstance(csv_content, bytes):
+        if b"\x00" in csv_content:
+            raise ValueError("CSV contains invalid null bytes.")
         text_data = csv_content.decode("utf-8-sig", errors="replace")
     else:
+        if "\x00" in csv_content:
+            raise ValueError("CSV contains invalid null bytes.")
         text_data = csv_content
 
     reader = csv.DictReader(io.StringIO(text_data))

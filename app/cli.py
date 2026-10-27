@@ -174,6 +174,56 @@ def prune_auth_failures(args: argparse.Namespace) -> int:
     return 0
 
 
+def unlock_user(args: argparse.Namespace) -> int:
+    """Unlock a locked user account and reset failed login attempts (SEC-05)."""
+    from sqlalchemy import delete, text
+    from app.kernel.models import RateLimitBucket
+
+    identifier = args.identifier.strip()
+    clean_id = normalize_identifier(identifier)
+    email = clean_id if "@" in clean_id else None
+    phone = clean_id if "@" not in clean_id else None
+
+    with session_scope() as session:
+        user_row = None
+        if session.bind and session.bind.dialect.name == "postgresql":
+            user_row = session.execute(
+                text("SELECT id, tenant_id, display_name FROM lookup_user_by_identifier(:ident)"),
+                {"ident": clean_id},
+            ).mappings().first()
+        else:
+            query = select(User)
+            if email:
+                query = query.where(User.email == email)
+            else:
+                query = query.where(User.phone == phone)
+            u = session.execute(query).scalars().first()
+            if u:
+                user_row = {"id": u.id, "tenant_id": u.tenant_id, "display_name": u.display_name}
+
+        if not user_row:
+            print(f"Error: User with identifier '{clean_id}' not found.", file=sys.stderr)
+            return 1
+
+        set_tenant(session, user_row["tenant_id"])
+        user = session.get(User, user_row["id"])
+        if not user:
+            print(f"Error: User with identifier '{clean_id}' not found.", file=sys.stderr)
+            return 1
+
+        user.locked_until = None
+        user.failed_login_attempts = 0
+
+        session.execute(
+            delete(RateLimitBucket).where(
+                RateLimitBucket.key.like(f"%user:{user.id}%")
+            )
+        )
+        session.commit()
+        print(f"Successfully unlocked user '{user.display_name}' ({clean_id}). Failed attempts reset to 0.")
+        return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Daily Close Admin CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -198,6 +248,11 @@ def main() -> None:
     p_prune = subparsers.add_parser("prune-auth-failures", help="Prune auth_failures older than N days")
     p_prune.add_argument("--days", type=int, default=7, help="Prune failures older than N days (default: 7)")
     p_prune.set_defaults(func=prune_auth_failures)
+
+    # unlock-user
+    p_unlock = subparsers.add_parser("unlock-user", help="Unlock a locked user account and reset failed login attempts")
+    p_unlock.add_argument("--identifier", required=True, help="User email or phone (+251...)")
+    p_unlock.set_defaults(func=unlock_user)
 
 
     args = parser.parse_args()

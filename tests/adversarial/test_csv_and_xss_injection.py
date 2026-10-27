@@ -24,7 +24,6 @@ from tests.conftest import authenticate_client
 
 
 class TestCsvAndInjectionAttacks:
-    @pytest.mark.xfail(strict=True, reason="SEC-VULN-03, Stage B")
     def test_csv_formula_injection_in_sales_export(
         self, db_session: Session, tenant_a: Tenant, owner_user_a: User
     ):
@@ -70,13 +69,51 @@ class TestCsvAndInjectionAttacks:
             cells = line.split(",")
             for cell in cells:
                 clean_cell = cell.strip('"').strip()
+                is_valid_phone = clean_cell.startswith("+") and clean_cell[1:].isdigit()
                 # A sanitized cell should prepend a single quote (e.g. "'=")
-                assert not (clean_cell.startswith("=") or clean_cell.startswith("@") or clean_cell.startswith("+") or (clean_cell.startswith("-") and not clean_cell[1:].isdigit())), (
+                assert not (clean_cell.startswith("=") or clean_cell.startswith("@") or (clean_cell.startswith("+") and not is_valid_phone) or (clean_cell.startswith("-") and not clean_cell[1:].isdigit())), (
                     f"VULNERABILITY SEC-VULN-03 CONFIRMED: Formula injection detected! "
                     f"Cell starts with unsanitized formula trigger: {clean_cell}"
                 )
 
-    @pytest.mark.xfail(strict=True, reason="SEC-VULN-04, Stage B")
+    def test_csv_phone_numbers_survive_and_formulas_neutralized(
+        self, db_session: Session, tenant_a: Tenant, owner_user_a: User
+    ):
+        """
+        SEC-03: Ensure phone numbers (e.g. +251911000000) survive export unchanged
+        without being prefixed with single-quote ('), while formula injections
+        like =cmd|'/c calc'!A0 are neutralized.
+        """
+        import csv as pycsv
+
+        ret = Retailer(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            name="=cmd|'/c calc'!A0",
+            phone="+251911000000",
+            created_at=datetime.now(timezone.utc),
+        )
+        inv = Invoice(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            retailer_id=ret.id,
+            invoice_number="INV-SAFE-PHONE",
+            amount_santim=10000,
+            issued_date=date(2026, 1, 1),
+            due_date=date(2026, 1, 15),
+            state=InvoiceState.OPEN.value,
+            created_at=datetime.now(timezone.utc),
+            created_by=owner_user_a.id,
+        )
+        db_session.add_all([ret, inv])
+        db_session.flush()
+
+        csv_content = export_sales_csv(db_session, tenant_id=tenant_a.id)
+        reader = list(pycsv.reader(csv_content.strip().splitlines()))
+        row = next(r for r in reader[1:] if r[0] == "INV-SAFE-PHONE")
+        assert row[1] == "'=cmd|'/c calc'!A0"
+        assert row[2] == "+251911000000"
+
     def test_telegram_html_injection_in_handle_review(
         self, db_session: Session, tenant_a: Tenant, owner_user_a: User
     ):

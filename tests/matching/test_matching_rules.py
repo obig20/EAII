@@ -238,3 +238,72 @@ class TestMatchingRules:
         assert res.status == "proposed"
         assert res.tier == MatchTier.TIER_C
         assert res.matches[0].invoice_id == inv.id
+
+    # -----------------------------------------------------------------------
+    # Performance Test: 2,000 payments against 1,000 invoices under 60 seconds
+    # -----------------------------------------------------------------------
+    @pytest.mark.slow
+    def test_matching_performance_2000_payments_1000_invoices(self):
+        """
+        Performance test: Reconciling 2,000 payment lines against 1,000 active invoices
+        must complete well under 60 seconds.
+        """
+        import time
+        import random
+
+        rng = random.Random(42)
+        retailers = [
+            _make_retailer(name=f"Retailer {i} Store", phone=f"0911{i:05d}", acc=f"1000{i:06d}")
+            for i in range(200)
+        ]
+        invoices = [
+            _make_invoice(
+                retailers[i % len(retailers)],
+                number=f"INV-{i:04d}",
+                amount=rng.randint(5000, 200000),
+            )
+            for i in range(1000)
+        ]
+
+        payments = []
+        retailer_by_id = {r.id: r for r in retailers}
+        for j in range(2000):
+            target_inv = invoices[j % len(invoices)]
+            target_ret = retailer_by_id[target_inv.retailer_id]
+            mode = j % 4
+            if mode == 0:
+                ref = f"Payment for {target_inv.invoice_number}"
+                c_name, c_acc = None, None
+            elif mode == 1:
+                ref = None
+                c_name = None
+                c_acc = target_ret.phone
+            elif mode == 2:
+                ref = None
+                c_name = target_ret.name.replace("Store", "Shop")
+                c_acc = None
+            else:
+                ref = f"Tax/Utility TX{j}"
+                c_name, c_acc = "Unknown Vendor", None
+
+            pl = PaymentLine(
+                id=uuid.uuid4(),
+                tenant_id=target_inv.tenant_id,
+                amount_santim=target_inv.amount_santim if mode < 3 else rng.randint(1000, 50000),
+                value_date=date(2026, 8, 25),
+                counterparty_name=c_name,
+                counterparty_account=c_acc,
+                raw_reference=ref,
+                evidence_level="L2",
+                state="unmatched",
+                created_at=date(2026, 8, 25),
+            )
+            payments.append(pl)
+
+        start_time = time.perf_counter()
+        results = [self.matcher.match_payment(pl, invoices, retailers) for pl in payments]
+        duration = time.perf_counter() - start_time
+
+        assert len(results) == 2000
+        assert duration < 60.0, f"Performance test exceeded 60s limit: took {duration:.2f}s"
+        print(f"\n[PERFORMANCE TEST] Matched 2,000 payments against 1,000 invoices in {duration:.2f} seconds ({2000/duration:.1f} payments/sec). Target: < 60s.")

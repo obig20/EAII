@@ -181,21 +181,21 @@ class PaymentMatcher:
         # TIER A: Invoice number in payment reference & amount checks
         # ------------------------------------------------------------------
         if ref_text:
-            # Extract all distinct invoice-like tokens in ref_text
-            raw_invoice_patterns = list(re.finditer(r"\b(?:INV|INVOICE)[-_\s#]*([A-Z0-9]+)\b", ref_text, re.IGNORECASE))
-            distinct_tokens_in_ref = {m.group(1).upper().strip() for m in raw_invoice_patterns}
+            ref_upper = ref_text.upper()
+            raw_invoice_patterns = list(re.finditer(r"\b(?:INV|INVOICE)[-_\s#]*([A-Z0-9]+)\b", ref_upper))
+            distinct_tokens_in_ref = {m.group(1).strip() for m in raw_invoice_patterns}
             is_compound_ref = len(distinct_tokens_in_ref) > 1
+
+            ref_full_tokens = set(re.findall(r"\b[A-Z0-9\-#_]+\b", ref_upper))
 
             matched_invoices: list[Invoice] = []
             for inv in active_invoices:
                 inv_num_clean = inv.invoice_number.upper().strip()
-                escaped_num = re.escape(inv_num_clean)
-                pattern = rf"\b{escaped_num}\b"
-
                 inv_digits = re.sub(r"^INV[-_\s#]*", "", inv_num_clean)
-                alt_pattern = rf"\b(?:INV|INVOICE)[-_\s#]*{re.escape(inv_digits)}\b"
 
-                if re.search(pattern, ref_text, re.IGNORECASE) or re.search(alt_pattern, ref_text, re.IGNORECASE):
+                if (inv_num_clean in ref_full_tokens) or (inv_digits in distinct_tokens_in_ref):
+                    matched_invoices.append(inv)
+                elif ("INV" in ref_upper or "INVOICE" in ref_upper) and re.search(rf"\b{re.escape(inv_num_clean)}\b", ref_upper):
                     matched_invoices.append(inv)
 
             if matched_invoices:
@@ -297,11 +297,12 @@ class PaymentMatcher:
                 clean_ref = re.sub(r"[-\s_#]+", "", ref_text.upper())
                 clean_ref_0 = clean_ref.replace("O", "0")
                 ocr_matches = []
-                for inv in active_invoices:
-                    norm_inv = re.sub(r"[-\s_#]+", "", inv.invoice_number.upper().strip())
-                    norm_inv_0 = norm_inv.replace("O", "0")
-                    if (norm_inv in clean_ref or norm_inv_0 in clean_ref_0) and len(norm_inv) >= 4:
-                        ocr_matches.append(inv)
+                if "INV" in clean_ref or "INVOICE" in clean_ref:
+                    for inv in active_invoices:
+                        norm_inv = inv.invoice_number.upper().strip().replace("-", "").replace(" ", "").replace("_", "").replace("#", "")
+                        norm_inv_0 = norm_inv.replace("O", "0")
+                        if (norm_inv in clean_ref or norm_inv_0 in clean_ref_0) and len(norm_inv) >= 4:
+                            ocr_matches.append(inv)
                 if ocr_matches:
                     combo = _find_subset_sum(ocr_matches, payment.amount_santim, max_items=len(ocr_matches))
                     target_invoices = combo if combo else ocr_matches[:3]

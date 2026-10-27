@@ -195,7 +195,6 @@ class TestTenantIsolationAndAuthAttacks:
     # -----------------------------------------------------------------------
     # Task 12: Rate Limiting & Nginx X-Forwarded-For Spoofing
     # -----------------------------------------------------------------------
-    @pytest.mark.xfail(strict=True, reason="SEC-VULN-05, Stage B")
     def test_task_12_x_forwarded_for_spoofing_and_owner_lockout(
         self, client: TestClient, db_session: Session, owner_user_a: User
     ):
@@ -207,25 +206,63 @@ class TestTenantIsolationAndAuthAttacks:
         owner_user_a.password_hash = hash_password("CorrectPassword123!")
         db_session.flush()
 
-        # Simulate untrusted proxy header: app must only trust configured reverse proxies
-        class DummyRequest:
-            headers = {"x-forwarded-for": "1.2.3.4, 10.0.0.1"}
+        # 1. Untrusted peer: headers are ignored, socket IP is used
+        class UntrustedPeerRequest:
+            headers = {"x-forwarded-for": "1.2.3.4", "x-real-ip": "1.2.3.4"}
+            client = type("Client", (), {"host": "198.51.100.99"})()
+
+        ip = _get_client_ip(UntrustedPeerRequest())
+        assert ip == "198.51.100.99", "Spoofed proxy headers from untrusted peer were not ignored!"
+
+        # 2. Trusted reverse proxy peer (127.0.0.1): respects proxy headers
+        class TrustedPeerRequest:
+            headers = {"x-forwarded-for": "1.2.3.4, 203.0.113.50"}
             client = type("Client", (), {"host": "127.0.0.1"})()
 
-        ip = _get_client_ip(DummyRequest())
-        assert ip != "1.2.3.4", "Untrusted leftmost IP was accepted from X-Forwarded-For header!"
+        ip_trusted = _get_client_ip(TrustedPeerRequest())
+        assert ip_trusted == "203.0.113.50"
+        assert ip_trusted != "1.2.3.4", "Untrusted leftmost IP was accepted from X-Forwarded-For header!"
 
-        # 5 failed attempts from an attacker IP must not lock out owner from logging in legitimately
+        # 3. 5 failed attempts from an attacker IP must not lock out owner from logging in legitimately
         for i in range(5):
             client.post("/login", data={"identifier": owner_user_a.email, "password": "BadPassword!"}, headers={"x-forwarded-for": "198.51.100.5"})
 
-        res = client.post("/login", data={"identifier": owner_user_a.email, "password": "CorrectPassword123!"})
+        res = client.post(
+            "/login",
+            data={"identifier": owner_user_a.email, "password": "CorrectPassword123!"},
+            follow_redirects=False,
+        )
         assert res.status_code == 303, "Owner account was locked out by attacker IP!"
+
+    def test_cli_unlock_user(self, db_session: Session, owner_user_a: User, monkeypatch):
+        """SEC-05: unlock-user CLI command resets lockout and failed attempts."""
+        from datetime import datetime, timedelta, timezone
+        from contextlib import contextmanager
+        from unittest.mock import MagicMock
+        from app.cli import unlock_user
+
+        @contextmanager
+        def _test_session_scope():
+            yield db_session
+
+        monkeypatch.setattr("app.cli.session_scope", _test_session_scope)
+
+        owner_user_a.locked_until = datetime.now(timezone.utc) + timedelta(minutes=15)
+        owner_user_a.failed_login_attempts = 10
+        db_session.flush()
+
+        args = MagicMock()
+        args.identifier = owner_user_a.email
+        res = unlock_user(args)
+        assert res == 0
+
+        db_session.refresh(owner_user_a)
+        assert owner_user_a.locked_until is None
+        assert owner_user_a.failed_login_attempts == 0
 
     # -----------------------------------------------------------------------
     # Task 13: Event Log PII & IP Address Audit
     # -----------------------------------------------------------------------
-    @pytest.mark.xfail(strict=True, reason="SEC-VULN-07, Stage B")
     def test_task_13_ip_address_stored_in_immutable_events(self, db_session: Session, owner_user_a: User):
         """
         Task 13 (SEC-VULN-07, Stage B):
@@ -277,9 +314,9 @@ class TestTenantIsolationAndAuthAttacks:
             ({"log_level": "DEBUG"}, "DEBUG log level not allowed in production"),
             ({"secret_key": "insecure-default-secret-key-32-chars!"}, "Default SECRET_KEY not allowed"),
             ({"secret_key": "twenty_chars_secret!"}, "SECRET_KEY must be at least 32 characters in production"),
+            ({"debug": True}, "Debug enabled not allowed in production"),
         ],
     )
-    @pytest.mark.xfail(strict=True, reason="SEC-VULN-08, Stage B")
     def test_task_15_production_settings_validation_failures(self, invalid_kwargs, expected_err):
         """Task 15 (SEC-VULN-08, Stage B): Insecure configurations must abort startup in production."""
         base_valid = {

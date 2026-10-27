@@ -21,7 +21,6 @@ from tests.conftest import authenticate_client
 
 
 class TestFileHandlingAttacks:
-    @pytest.mark.xfail(strict=True, reason="SEC-VULN-13, Stage B")
     def test_null_bytes_in_csv_upload(
         self, client: TestClient, db_session: Session, owner_user_a
     ):
@@ -49,7 +48,6 @@ class TestFileHandlingAttacks:
         with pytest.raises(Exception):
             _parse_xlsx_pure_python(truncated_bytes)
 
-    @pytest.mark.xfail(strict=True, reason="SEC-VULN-13, Stage B")
     def test_billion_laughs_xml_in_xlsx_blocked(self):
         """XML entity expansion in sheet1.xml must be blocked by parser defusedxml / entity refusal."""
         xml_bomb = (
@@ -68,4 +66,42 @@ class TestFileHandlingAttacks:
 
         bio.seek(0)
         with pytest.raises(Exception):
+            _parse_xlsx_pure_python(bio.getvalue())
+
+    def test_utf16_encoded_billion_laughs_xml_in_xlsx_blocked(self):
+        """SEC-13: UTF-16 encoded XML bomb in sheet1.xml must be rejected by defusedxml."""
+        xml_bomb = (
+            '<?xml version="1.0" encoding="utf-16"?>\n'
+            '<!DOCTYPE lolz [\n'
+            ' <!ENTITY lol "lol">\n'
+            ' <!ELEMENT lolz (#PCDATA)>\n'
+            ' <!ENTITY lol1 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">\n'
+            ']>\n'
+            '<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>&lol1;</v></c></row></sheetData></worksheet>'
+        )
+        bio = io.BytesIO()
+        with zipfile.ZipFile(bio, "w", compression=zipfile.ZIP_DEFLATED) as z:
+            z.writestr("xl/worksheets/sheet1.xml", xml_bomb.encode("utf-16"))
+            z.writestr("[Content_Types].xml", b"<Types></Types>")
+
+        bio.seek(0)
+        with pytest.raises(ValueError, match="Invalid XML in XLSX archive"):
+            _parse_xlsx_pure_python(bio.getvalue())
+
+    def test_utf16_encoded_xxe_in_xlsx_blocked(self):
+        """SEC-13: UTF-16 encoded XXE in sheet1.xml must be rejected by defusedxml."""
+        xxe_payload = (
+            '<?xml version="1.0" encoding="utf-16"?>\n'
+            '<!DOCTYPE foo [\n'
+            ' <!ELEMENT foo ANY >\n'
+            ' <!ENTITY xxe SYSTEM "file:///etc/passwd" >]>\n'
+            '<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>&xxe;</v></c></row></sheetData></worksheet>'
+        )
+        bio = io.BytesIO()
+        with zipfile.ZipFile(bio, "w", compression=zipfile.ZIP_DEFLATED) as z:
+            z.writestr("xl/worksheets/sheet1.xml", xxe_payload.encode("utf-16"))
+            z.writestr("[Content_Types].xml", b"<Types></Types>")
+
+        bio.seek(0)
+        with pytest.raises(ValueError, match="Invalid XML in XLSX archive"):
             _parse_xlsx_pure_python(bio.getvalue())

@@ -53,7 +53,7 @@ from app.kernel.db import get_session
 from app.kernel.enums import EvidenceLevel, InvoiceState, MatchState, PaymentState, UserRole
 from app.kernel.events import append_event
 from app.kernel.guards import InsufficientEvidenceError, assert_confirmable
-from app.kernel.models import ImportBatch, Invoice, PaymentLine, PaymentMatch, Retailer, Session as SessionModel, Tenant, User
+from app.kernel.models import ImportBatch, Invoice, PaymentLine, PaymentMatch, RateLimitBucket, Retailer, Session as SessionModel, Tenant, User
 from app.kernel.money import to_etb
 from app.kernel.persistent_rate_limit import (
     RateLimitExceededError,
@@ -105,11 +105,29 @@ def validate_uploaded_file(file: UploadFile, allowed_extensions: set[str]) -> st
 
 
 def _get_client_ip(request: Request) -> str:
-    """Extract client IP address for persistent rate limiting."""
-    x_forwarded = request.headers.get("x-forwarded-for")
-    if x_forwarded:
-        return x_forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "127.0.0.1"
+    """
+    Extract client IP address for persistent rate limiting.
+    SEC-05: Trust X-Real-IP and X-Forwarded-For ONLY when the immediate
+    peer address (request.client.host) is in configured settings.trusted_proxies
+    (default ["127.0.0.1"]). Otherwise, use socket address.
+    """
+    peer_ip = "127.0.0.1"
+    if getattr(request, "client", None) and request.client.host:
+        peer_ip = request.client.host
+
+    trusted_list = getattr(settings, "trusted_proxies", ["127.0.0.1", "::1"])
+    if peer_ip in trusted_list:
+        x_real_ip = request.headers.get("x-real-ip")
+        if x_real_ip:
+            return x_real_ip.strip()
+
+        x_forwarded = request.headers.get("x-forwarded-for")
+        if x_forwarded:
+            ips = [ip.strip() for ip in x_forwarded.split(",") if ip.strip()]
+            if ips:
+                return ips[-1]
+
+    return peer_ip
 
 
 router = APIRouter()
@@ -222,8 +240,15 @@ def login_submit(
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
-    # If locked, invoke dummy verify for timing parity and return identical 401 response
-    if user_row["locked_until"] and user_row["locked_until"] > now:
+    # 4b. Check if account or (account, IP) pair is locked / delayed (SEC-05)
+    user_ip_key = f"login:account_ip:{user_row['id']}:{client_ip}"
+    user_ip_bucket = session.get(RateLimitBucket, user_ip_key)
+
+    is_current_ip_locked = bool(user_ip_bucket and user_ip_bucket.locked_until and user_ip_bucket.locked_until > now)
+    is_account_locked = bool(user_row["locked_until"] and user_row["locked_until"] > now)
+
+    # If the user is locked, only block this request if the current IP was locked or account was admin-locked
+    if is_current_ip_locked or (is_account_locked and (user_ip_bucket is not None or user_row["role"] != "owner")):
         verify_password(_DUMMY_ARGON2_HASH, password)
         set_tenant(session, user_row["tenant_id"])
         user = session.get(User, user_row["id"])
@@ -239,7 +264,6 @@ def login_submit(
     # 5. Verify Argon2id password hash under tenant context
     set_tenant(session, user_row["tenant_id"])
     user = session.get(User, user_row["id"])
-
     if not user or not verify_password(user.password_hash, password):
         record_failed_login(session, user=user, ip_address=client_ip)
         session.commit()
@@ -650,19 +674,24 @@ async def bulk_sales(
     tenant, user, _ = session_info
     set_tenant(session, tenant.id)
 
-    validate_uploaded_file(file, ALLOWED_SALES_EXTENSIONS)
+    safe_filename = validate_uploaded_file(file, ALLOWED_SALES_EXTENSIONS)
     content = await file.read(MAX_UPLOAD_SIZE + 1)
     if len(content) > MAX_UPLOAD_SIZE:
         raise HTTPException(status_code=413, detail="File too large. Maximum allowed size is 10MB.")
     if not content or len(content.strip()) == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if b"\x00" in content:
+        raise HTTPException(status_code=400, detail="Uploaded CSV file contains invalid null bytes.")
 
-    created, gaps, errors = parse_and_record_sales_csv(
-        session,
-        tenant_id=tenant.id,
-        user_id=user.id,
-        csv_content=content,
-    )
+    try:
+        created, gaps, errors = parse_and_record_sales_csv(
+            session,
+            tenant_id=tenant.id,
+            user_id=user.id,
+            csv_content=content,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     session.commit()
 
     msg = f"Bulk upload: {len(created)} invoices created."
@@ -694,6 +723,8 @@ async def upload_statement(
         raise HTTPException(status_code=413, detail="File too large. Maximum allowed size is 10MB.")
     if not content or len(content.strip()) == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if not safe_filename.endswith(".xlsx") and b"\x00" in content:
+        raise HTTPException(status_code=400, detail="Uploaded statement CSV file contains invalid null bytes.")
 
     # 1. Resolve Config
     cfg_map = {

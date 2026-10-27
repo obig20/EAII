@@ -82,16 +82,40 @@ def record_failed_login(
 ) -> None:
     """
     Track consecutive failed login attempts on a user account and emit append-only audit event.
-    Locks the user account for 15 minutes after 5 consecutive failures.
-    When user is None (unknown identifier), records into auth_failures with HMAC-SHA256,
-    never writing foreign-key-violating dummy tenant ids into the events table (SEC-12, SEC-06).
+    SEC-05: Replaces blanket lockout with per-account-and-IP progressive delays:
+      - 5 failures from an IP -> 1 minute lockout on that (user, IP) pair
+      - 10 failures from an IP -> 15 minutes lockout on that (user, IP) pair
+      - 15+ failures from an IP -> 60 minutes lockout on that (user, IP) pair
+    External attacker IP cannot lock out legitimate user connecting from another IP.
     """
     now = datetime.now(timezone.utc)
 
     if user:
         user.failed_login_attempts += 1
+        user_ip_key = f"login:account_ip:{user.id}:{ip_address}"
+        ip_bucket = session.get(RateLimitBucket, user_ip_key)
+        if not ip_bucket:
+            ip_bucket = RateLimitBucket(
+                key=user_ip_key,
+                attempts=1,
+                first_attempt_at=now,
+                last_attempt_at=now,
+                locked_until=None,
+            )
+            session.add(ip_bucket)
+        else:
+            ip_bucket.attempts += 1
+            ip_bucket.last_attempt_at = now
+            if ip_bucket.attempts >= 15:
+                ip_bucket.locked_until = now + timedelta(minutes=60)
+            elif ip_bucket.attempts >= 10:
+                ip_bucket.locked_until = now + timedelta(minutes=15)
+            elif ip_bucket.attempts >= 5:
+                ip_bucket.locked_until = now + timedelta(minutes=1)
+
         if user.failed_login_attempts >= 5:
-            user.locked_until = now + timedelta(minutes=15)
+            user.locked_until = ip_bucket.locked_until or (now + timedelta(minutes=15))
+
         session.flush()
 
         append_event(
@@ -102,8 +126,10 @@ def record_failed_login(
             aggregate_id=user.id,
             actor_id=user.id,
             payload={
-                "ip_address": ip_address,
-                "locked": bool(user.locked_until and user.locked_until > now),
+                "locked": bool(
+                    (user.locked_until and user.locked_until > now)
+                    or (ip_bucket.locked_until and ip_bucket.locked_until > now)
+                ),
             },
         )
     else:
@@ -138,6 +164,13 @@ def record_successful_login(
     """Reset failed attempts and record successful login event."""
     user.failed_login_attempts = 0
     user.locked_until = None
+    user_ip_key = f"login:account_ip:{user.id}:{ip_address}"
+    bucket = session.get(RateLimitBucket, user_ip_key)
+    if bucket:
+        session.delete(bucket)
+    u_bucket = session.get(RateLimitBucket, f"lockout:user:{user.id}")
+    if u_bucket:
+        session.delete(u_bucket)
     session.flush()
 
     append_event(
@@ -147,5 +180,5 @@ def record_successful_login(
         aggregate_type="user",
         aggregate_id=user.id,
         actor_id=user.id,
-        payload={"ip_address": ip_address},
+        payload={},
     )
