@@ -36,6 +36,7 @@ _engine = create_engine(
     pool_pre_ping=True,
     echo=settings.log_level == "DEBUG",
 )
+engine = _engine
 
 
 # ---------------------------------------------------------------------------

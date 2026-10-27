@@ -307,7 +307,7 @@ def cli_release_gate(args: argparse.Namespace) -> int:
     """
     import subprocess
     from app.kernel.enums import EvidenceLevel
-    from app.matching.matcher import assert_confirmable, InsufficientEvidenceError
+    from app.kernel.guards import assert_confirmable, InsufficientEvidenceError
 
     print("======================================================================")
     print("DAILY CLOSE — PILOT RELEASE GATE VERIFICATION")
