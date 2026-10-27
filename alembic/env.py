@@ -12,7 +12,9 @@ config = context.config
 # Override the sqlalchemy.url with the environment variable.
 # Migrations use DATABASE_MIGRATION_URL (superuser) so that RLS FORCE and
 # REVOKE statements can be executed; fall back to DATABASE_URL.
-db_url = os.environ.get("DATABASE_MIGRATION_URL") or os.environ.get("DATABASE_URL")
+from app.settings import settings
+
+db_url = os.environ.get("DATABASE_MIGRATION_URL") or os.environ.get("DATABASE_URL") or settings.database_migration_url or settings.database_url
 if not db_url:
     raise RuntimeError(
         "Set DATABASE_MIGRATION_URL or DATABASE_URL environment variable before running Alembic."

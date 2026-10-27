@@ -48,3 +48,19 @@ Thumbs.db
 # Logs (never commit logs with potential PII)
 *.log
 logs/
+
+# Backups and age encryption keys / files
+backups/
+*.age
+*.age.pub
+
+# Generated reports & outputs
+report.html
+reports/
+*_report.html
+
+# Real / Sensitive Data folders
+data/
+real_data/
+test_data/
+sensitive/

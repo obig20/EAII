@@ -112,4 +112,24 @@ $$P_{\text{paid}}(inv) = \sum \{ m.\text{matched\_santim} \mid m.\text{invoice\_
 ## 5. Security Recommendations for Addis Ababa Production Host
 1. **Network Firewalls (UFW):** Permit incoming traffic only on TCP ports 22 (SSH with key authentication only), 80 (HTTP redirect), and 443 (HTTPS). Block port 5432 from external interfaces.
 2. **PostgreSQL Role Separation:** Ensure the application connects solely using role `app` (never `postgres`). Verify password complexity ($\ge 32$ random characters).
-3. **Backup Key Management:** Store the OpenSSL AES-256-CBC backup passphrase in an offline physical vault and secure environment file; never commit it to source control.
+3. **Backup Key Management:** Store the age public recipient key on the host (`backup_pubkey.txt`); keep the master private key (`AGE-SECRET-KEY-1...`) strictly offline in physical cold storage; never commit it to source control.
+
+---
+
+## 6. Vulnerability Remediation Inventory (SEC-VULN-01 to SEC-VULN-13)
+
+| ID | Severity | Area | Vulnerability Description | Remediation & Defensive Control | Verification Test Name |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **SEC-VULN-01** | CRITICAL | Backups | `pg_dump` fails under `app` role due to RLS tables | Dedicated `backup_role` with `BYPASSRLS` + `age` public-key encryption | `test_sec_vuln_01_pg_dump_under_app_role_fails_due_to_rls`, `test_backup_encryption_age_public_key_mode` |
+| **SEC-VULN-02** | HIGH | Ledger / AR | Double credit via concurrent match approvals | Pessimistic locking (`with_for_update`) + DB triggers on allocations | `test_attack_double_counting_payment_line`, `test_attack_parallel_approvals_race_condition` |
+| **SEC-VULN-03** | MEDIUM | Exports | CSV formula injection (CWE-1236) | Single-quote sanitization (`sanitize_csv_cell`) on all string cells | `test_csv_formula_injection_in_sales_export` |
+| **SEC-VULN-04** | MEDIUM | Channels | Telegram HTML entity injection and bot crashes | Dynamic interpolation wrapped in `html.escape()` | `test_telegram_html_injection_in_handle_review` |
+| **SEC-VULN-05** | MEDIUM | Auth | Spoofed `X-Forwarded-For` evading limits & locking owner | IP validation restricted to `trusted_proxies` list | `test_x_forwarded_for_trusted_proxies` |
+| **SEC-VULN-06** | LOW | Auth | Timing oracle distinguishing existing vs non-existent accounts | Dummy Argon2id hash computation on unknown identifiers | `test_dummy_argon2id_timing_normalization` |
+| **SEC-VULN-07** | LOW | Privacy | Plaintext client IP addresses in append-only event log | IP addresses stripped from `events.payload`; kept in ephemeral buckets only | `test_ip_address_not_in_events_payload` |
+| **SEC-VULN-08** | LOW | Config | Insecure configurations booting in production mode | Pydantic `@model_validator` failing startup on insecure settings | `test_production_startup_validation` |
+| **SEC-VULN-09** | MEDIUM | Multi-Tenancy | Pre-auth login lookup returning 0 rows under `app` RLS | Narrow `SECURITY DEFINER` lookup functions with fixed search paths | `test_pre_auth_login_lookup_under_app_role` |
+| **SEC-VULN-10** | HIGH | Importers | Duplicate statement file uploads duplicating payment lines | Batch SHA-256 hash unique constraint + line-index composite key | `test_statement_import_duplicate_row_becomes_possible_duplicate_review_item` |
+| **SEC-VULN-11** | HIGH | Matcher | Tier B coincidental amount matches causing false auto-confirmations | Auto-confirm strictly restricted to Tier A; 0 false confirms across 10 seeds | `test_synthetic_benchmark_10_seeds`, `test_independent_generator_10_seeds` |
+| **SEC-VULN-12** | HIGH | Auth | Unknown username causing 500 ForeignKeyViolation crash | Unregistered failures tracked in non-tenant `auth_failures` table | `test_unknown_user_login_does_not_crash_fk` |
+| **SEC-VULN-13** | MEDIUM | Parsers | CSV null byte (`\x00`) causing unhandled database error | Early binary check rejecting null bytes with clean HTTP 400 | `test_null_bytes_in_csv_upload` |
