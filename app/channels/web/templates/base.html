@@ -37,19 +37,24 @@
         <span class="text-xs font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 uppercase tracking-wider">Ethiopia (ETB)</span>
         <span class="text-xs text-slate-400">| ዕለታዊ ሂሳብ ማጠቃለያ</span>
       </div>
-      <div class="flex items-center space-x-4 text-sm">
+      <div class="flex items-center space-x-3 text-sm">
         {% if user_role %}
-        <span class="text-slate-300">Tenant: <strong class="text-white">{{ tenant_name }}</strong></span>
-        <span class="px-2.5 py-1 rounded-full text-xs font-medium {% if user_role == 'owner' %}bg-amber-500/20 text-amber-300 border border-amber-500/30{% else %}bg-blue-500/20 text-blue-300 border border-blue-500/30{% endif %}">
-          Role: {{ user_role|capitalize }}
+        <span class="text-xs text-slate-400 hidden md:inline">Tenant: <strong class="text-slate-200">{{ tenant_name }}</strong></span>
+        <a href="/" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded transition">AR Dashboard</a>
+        <a href="/inventory" class="text-xs bg-slate-800 hover:bg-slate-700 text-emerald-300 px-2.5 py-1.5 rounded transition">Inventory</a>
+        <a href="/purchases" class="text-xs bg-slate-800 hover:bg-slate-700 text-sky-300 px-2.5 py-1.5 rounded transition">Purchases (AP)</a>
+        <a href="/delivery" class="text-xs bg-slate-800 hover:bg-slate-700 text-purple-300 px-2.5 py-1.5 rounded transition">Delivery</a>
+        <a href="/accounting" class="text-xs bg-slate-800 hover:bg-slate-700 text-amber-300 px-2.5 py-1.5 rounded transition">General Ledger</a>
+        <span class="px-2 py-0.5 rounded text-xs font-medium {% if user_role == 'owner' %}bg-amber-500/20 text-amber-300 border border-amber-500/30{% else %}bg-blue-500/20 text-blue-300 border border-blue-500/30{% endif %}">
+          {{ user_role|capitalize }}
         </span>
         {% if user_role == 'owner' %}
-        <a href="/settings/users" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded transition">Users</a>
+        <a href="/settings/users" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded transition">Users</a>
         {% endif %}
-        <a href="/brief" target="_blank" class="text-xs bg-slate-800 hover:bg-slate-700 text-amber-300 px-3 py-1.5 rounded transition">Morning Brief</a>
+        <a href="/brief" target="_blank" class="text-xs bg-slate-800 hover:bg-slate-700 text-amber-300 px-2 py-1 rounded transition">Brief</a>
         <form method="POST" action="/logout" class="inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button type="submit" class="text-xs text-rose-300 hover:text-rose-100 bg-rose-950/40 border border-rose-800/40 px-2.5 py-1 rounded transition">Log out</button>
+          <button type="submit" class="text-xs text-rose-300 hover:text-rose-100 bg-rose-950/40 border border-rose-800/40 px-2 py-1 rounded transition">Logout</button>
         </form>
         {% endif %}
       </div>

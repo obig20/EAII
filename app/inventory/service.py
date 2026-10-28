@@ -506,3 +506,8 @@ def get_warehouse_stock_summary(
         "low_stock_items": low_stock_items,
         "inventory": items,
     }
+
+
+# Convenience alias for web channels
+get_inventory_summary = get_warehouse_stock_summary
+

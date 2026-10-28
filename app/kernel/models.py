@@ -1014,3 +1014,117 @@ class CashTransitHandover(Base):
     driver: Mapped[DeliveryDriver] = relationship()
     custodian: Mapped[User] = relationship()
 
+
+# ---------------------------------------------------------------------------
+# ERP: withholding_receipts (2% Ethiopian Withholding Tax Receipts)
+# ---------------------------------------------------------------------------
+class WithholdingReceipt(Base):
+    __tablename__ = "withholding_receipts"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "receipt_number", name="uq_withholding_tenant_receipt_num"),
+        CheckConstraint("gross_amount_santim > 0", name="ck_wht_gross_positive"),
+        CheckConstraint("withheld_amount_santim > 0", name="ck_wht_withheld_positive"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    receipt_number: Mapped[str] = mapped_column(String(64), nullable=False)
+    counterparty_type: Mapped[str] = mapped_column(String(16), nullable=False)  # 'supplier' | 'retailer'
+    counterparty_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    counterparty_tin: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_invoice_ref: Mapped[str] = mapped_column(String(64), nullable=False)
+    gross_amount_santim: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    withheld_amount_santim: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    issued_date: Mapped[date] = mapped_column(Date, nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+# ---------------------------------------------------------------------------
+# ERP: accounts (Chart of Accounts)
+# ---------------------------------------------------------------------------
+class Account(Base):
+    __tablename__ = "accounts"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "account_code", name="uq_accounts_tenant_code"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    account_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    account_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    category: Mapped[str] = mapped_column(String(32), nullable=False)  # 'asset' | 'liability' | 'equity' | 'revenue' | 'expense'
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    lines: Mapped[list[JournalLine]] = relationship(back_populates="account")
+
+
+# ---------------------------------------------------------------------------
+# ERP: journal_entries
+# ---------------------------------------------------------------------------
+class JournalEntry(Base):
+    __tablename__ = "journal_entries"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "entry_number", name="uq_journal_entries_tenant_num"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    entry_number: Mapped[str] = mapped_column(String(64), nullable=False)
+    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    reference: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="posted")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    lines: Mapped[list[JournalLine]] = relationship(back_populates="journal_entry", cascade="all, delete-orphan")
+
+
+# ---------------------------------------------------------------------------
+# ERP: journal_lines
+# ---------------------------------------------------------------------------
+class JournalLine(Base):
+    __tablename__ = "journal_lines"
+    __table_args__ = (
+        CheckConstraint("debit_santim >= 0", name="ck_jl_debit_non_negative"),
+        CheckConstraint("credit_santim >= 0", name="ck_jl_credit_non_negative"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    journal_entry_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("journal_entries.id"), nullable=False, index=True
+    )
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True
+    )
+    debit_santim: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    credit_santim: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    journal_entry: Mapped[JournalEntry] = relationship(back_populates="lines")
+    account: Mapped[Account] = relationship(back_populates="lines")
+

@@ -1585,3 +1585,208 @@ def submit_balance_dispute(
             "explanation": explanation,
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# ERP Extension Modules: Inventory, Purchases (AP), Delivery Fleet & Accounting (GL)
+# ---------------------------------------------------------------------------
+@router.get("/inventory", response_class=HTMLResponse)
+def inventory_dashboard(
+    request: Request,
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+):
+    from app.inventory.service import get_inventory_summary
+    tenant, user, session_rec = session_info
+    set_tenant(session, tenant.id)
+
+    summary = get_inventory_summary(session, tenant_id=tenant.id)
+    csrf_token = generate_csrf_token(session_rec.id, settings.secret_key)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="inventory.html",
+        context={
+            "tenant_name": tenant.name,
+            "user_role": user.role,
+            "summary": summary,
+            "csrf_token": csrf_token,
+            "is_demo": getattr(tenant, "is_demo", False),
+        },
+    )
+
+
+@router.get("/purchases", response_class=HTMLResponse)
+def purchases_dashboard(
+    request: Request,
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+):
+    from app.kernel.models import Supplier
+    from app.purchases.service import get_supplier_ap_summary
+    tenant, user, session_rec = session_info
+    set_tenant(session, tenant.id)
+
+    ap_summary = get_supplier_ap_summary(session, tenant_id=tenant.id)
+    suppliers_db = session.execute(
+        select(Supplier).where(Supplier.tenant_id == tenant.id).order_by(Supplier.name)
+    ).scalars().all()
+
+    csrf_token = generate_csrf_token(session_rec.id, settings.secret_key)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="purchases.html",
+        context={
+            "tenant_name": tenant.name,
+            "user_role": user.role,
+            "ap_summary": ap_summary,
+            "suppliers": suppliers_db,
+            "csrf_token": csrf_token,
+            "is_demo": getattr(tenant, "is_demo", False),
+        },
+    )
+
+
+@router.get("/delivery", response_class=HTMLResponse)
+def delivery_dashboard(
+    request: Request,
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+):
+    from app.kernel.models import CashTransitHandover, DeliveryDriver, DeliveryTrip, DeliveryTripStop
+    tenant, user, session_rec = session_info
+    set_tenant(session, tenant.id)
+
+    drivers = session.execute(
+        select(DeliveryDriver).where(DeliveryDriver.tenant_id == tenant.id).order_by(DeliveryDriver.name)
+    ).scalars().all()
+
+    trips_db = session.execute(
+        select(DeliveryTrip).where(DeliveryTrip.tenant_id == tenant.id).order_by(DeliveryTrip.created_at.desc())
+    ).scalars().all()
+
+    trips_list = []
+    completed_stops_count = 0
+    total_cash_collected_santim = 0
+
+    for tr in trips_db:
+        stops = session.execute(
+            select(DeliveryTripStop).where(DeliveryTripStop.trip_id == tr.id)
+        ).scalars().all()
+        completed = sum(1 for s in stops if s.status == "completed")
+        cash_collected = sum(s.cash_collected_santim for s in stops)
+        completed_stops_count += completed
+        total_cash_collected_santim += cash_collected
+
+        handover = session.execute(
+            select(CashTransitHandover).where(CashTransitHandover.trip_id == tr.id)
+        ).scalars().first()
+
+        wh_name = tr.warehouse.name if getattr(tr, "warehouse", None) else "Main Warehouse"
+        dr_name = tr.driver.name if getattr(tr, "driver", None) else "Unknown Driver"
+
+        trips_list.append({
+            "id": str(tr.id),
+            "trip_number": tr.trip_number,
+            "driver_name": dr_name,
+            "vehicle_plate": tr.driver.vehicle_plate if getattr(tr, "driver", None) else None,
+            "warehouse_name": wh_name,
+            "status": tr.state,
+            "total_stops": len(stops),
+            "completed_stops": completed,
+            "cash_collected_etb": f"{cash_collected / 100:,.2f}",
+            "handover_amount_etb": f"{handover.actual_cash_santim / 100:,.2f}" if handover else None,
+        })
+
+    csrf_token = generate_csrf_token(session_rec.id, settings.secret_key)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="delivery.html",
+        context={
+            "tenant_name": tenant.name,
+            "user_role": user.role,
+            "drivers": drivers,
+            "trips": trips_list,
+            "completed_stops_count": completed_stops_count,
+            "total_cash_collected_etb": f"{total_cash_collected_santim / 100:,.2f}",
+            "csrf_token": csrf_token,
+            "is_demo": getattr(tenant, "is_demo", False),
+        },
+    )
+
+
+@router.get("/accounting", response_class=HTMLResponse)
+def accounting_dashboard(
+    request: Request,
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+):
+    from app.accounting.service import get_balance_sheet, get_profit_and_loss, get_trial_balance, init_default_chart_of_accounts
+    tenant, user, session_rec = session_info
+    set_tenant(session, tenant.id)
+
+    # Ensure Chart of Accounts is initialized
+    init_default_chart_of_accounts(session, tenant_id=tenant.id)
+    session.commit()
+
+    today = datetime.now(timezone.utc).date()
+    start_of_year = date(today.year, 1, 1)
+
+    tb = get_trial_balance(session, tenant_id=tenant.id, as_of_date=today)
+    pnl = get_profit_and_loss(session, tenant_id=tenant.id, start_date=start_of_year, end_date=today)
+    bs = get_balance_sheet(session, tenant_id=tenant.id, as_of_date=today)
+
+    csrf_token = generate_csrf_token(session_rec.id, settings.secret_key)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="accounting.html",
+        context={
+            "tenant_name": tenant.name,
+            "user_role": user.role,
+            "trial_balance": tb,
+            "pnl": pnl,
+            "balance_sheet": bs,
+            "csrf_token": csrf_token,
+            "is_demo": getattr(tenant, "is_demo", False),
+        },
+    )
+
+
+@router.get("/accounting/exports/peachtree.csv")
+def download_peachtree_csv(
+    session: Session = Depends(get_session),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+):
+    from app.accounting.service import export_peachtree_journal_csv
+    tenant, _ = owner_context
+    set_tenant(session, tenant.id)
+    today = datetime.now(timezone.utc).date()
+    start_of_year = date(today.year, 1, 1)
+    content = export_peachtree_journal_csv(session, tenant_id=tenant.id, start_date=start_of_year, end_date=today)
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=peachtree_journal_export.csv"},
+    )
+
+
+@router.get("/accounting/exports/mor-vat.csv")
+def download_mor_vat_csv(
+    session: Session = Depends(get_session),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+):
+    from app.tax.service import generate_mor_vat_declaration_csv
+    tenant, _ = owner_context
+    set_tenant(session, tenant.id)
+    today = datetime.now(timezone.utc).date()
+    start_of_year = date(today.year, 1, 1)
+    content = generate_mor_vat_declaration_csv(session, tenant_id=tenant.id, start_date=start_of_year, end_date=today)
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=mor_vat_declaration_{today.year}_{today.month:02d}.csv"},
+    )
+

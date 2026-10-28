@@ -135,6 +135,26 @@ class CashHandoverStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class TaxRateType(str, Enum):
+    VAT_15 = "vat_15"          # 15% standard Ethiopian VAT
+    WITHHOLDING_2 = "withholding_2"  # 2% withholding on purchases >= 10,000 ETB
+    TOT_10 = "tot_10"          # 10% Turnover Tax
+    EXEMPT = "exempt"          # 0% tax exempt
+
+
+class AccountCategory(str, Enum):
+    ASSET = "asset"
+    LIABILITY = "liability"
+    EQUITY = "equity"
+    REVENUE = "revenue"
+    EXPENSE = "expense"
+
+
+class JournalEntryState(str, Enum):
+    POSTED = "posted"
+    VOID = "void"
+
+
 # ---------------------------------------------------------------------------
 # Evidence levels that are permitted to CONFIRM a payment.
 # This set is the authoritative source used by guards.py.

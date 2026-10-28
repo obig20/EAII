@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="space-y-6">
+  <!-- Header & Actions -->
+  <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div>
+      <h1 class="text-2xl font-bold text-slate-900 tracking-tight">Double-Entry General Ledger & Tax Compliance</h1>
+      <p class="text-sm text-slate-500">ድርብ-መዝገብ ጠቅላላ ሂሳብ እና የግብር ሪፖርት | Chart of accounts, Trial Balance, P&L, Balance Sheet, and Peachtree export</p>
+    </div>
+    <div class="flex items-center space-x-2">
+      <a href="/accounting/exports/peachtree.csv" class="text-xs bg-slate-900 hover:bg-slate-800 text-amber-300 font-semibold px-3 py-2 rounded-lg border border-slate-700 shadow-sm transition">
+        📥 Export Peachtree / Sage 50 (CSV)
+      </a>
+      <a href="/accounting/exports/mor-vat.csv" class="text-xs bg-emerald-800 hover:bg-emerald-700 text-white font-semibold px-3 py-2 rounded-lg shadow-sm transition">
+        📄 MOR VAT Declaration (CSV)
+      </a>
+    </div>
+  </div>
+
+  <!-- KPI Badges -->
+  <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Total Assets</div>
+      <div class="text-2xl font-bold text-slate-900 mt-1">{{ balance_sheet.total_assets_etb }} <span class="text-xs font-normal text-slate-400">ETB</span></div>
+    </div>
+    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Total Liabilities</div>
+      <div class="text-2xl font-bold text-slate-900 mt-1">{{ balance_sheet.total_liabilities_etb }} <span class="text-xs font-normal text-slate-400">ETB</span></div>
+    </div>
+    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Gross Profit</div>
+      <div class="text-2xl font-bold text-emerald-600 mt-1">{{ pnl.gross_profit_etb }} <span class="text-xs font-normal text-slate-400">ETB</span></div>
+    </div>
+    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Trial Balance Guard</div>
+      <div class="text-2xl font-bold {% if trial_balance.is_balanced %}text-emerald-600{% else %}text-rose-600{% endif %} mt-1">
+        {% if trial_balance.is_balanced %}Balanced (Dr = Cr){% else %}Imbalance Detected{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Financial Statements Grid -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- P&L Card -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+      <h3 class="text-base font-bold text-slate-900 mb-4 pb-2 border-b border-slate-100 flex items-center justify-between">
+        <span>Income Statement (P&L)</span>
+        <span class="text-xs font-normal text-slate-500">{{ pnl.period }}</span>
+      </h3>
+      <dl class="space-y-3 text-sm">
+        <div class="flex justify-between py-1 border-b border-slate-50">
+          <dt class="text-slate-600">Sales & Revenue</dt>
+          <dd class="font-mono font-semibold text-slate-900">{{ pnl.revenue_etb }} ETB</dd>
+        </div>
+        <div class="flex justify-between py-1 border-b border-slate-50">
+          <dt class="text-slate-600">Cost of Goods Sold (COGS)</dt>
+          <dd class="font-mono text-rose-600">-{{ pnl.cogs_etb }} ETB</dd>
+        </div>
+        <div class="flex justify-between py-1 border-b border-slate-200 bg-slate-50 px-2 rounded">
+          <dt class="font-semibold text-slate-800">Gross Profit</dt>
+          <dd class="font-mono font-bold text-slate-900">{{ pnl.gross_profit_etb }} ETB</dd>
+        </div>
+        <div class="flex justify-between py-1 border-b border-slate-50">
+          <dt class="text-slate-600">Operating Expenses</dt>
+          <dd class="font-mono text-rose-600">-{{ pnl.expenses_etb }} ETB</dd>
+        </div>
+        <div class="flex justify-between py-2 border-t-2 border-slate-900 bg-emerald-50/50 px-2 rounded">
+          <dt class="font-bold text-slate-900">Net Operating Income</dt>
+          <dd class="font-mono font-bold text-emerald-700 text-base">{{ pnl.net_income_etb }} ETB</dd>
+        </div>
+      </dl>
+    </div>
+
+    <!-- Balance Sheet Card -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+      <h3 class="text-base font-bold text-slate-900 mb-4 pb-2 border-b border-slate-100 flex items-center justify-between">
+        <span>Balance Sheet Summary</span>
+        <span class="text-xs font-normal text-slate-500">As of {{ trial_balance.as_of_date }}</span>
+      </h3>
+      <dl class="space-y-3 text-sm">
+        <div class="flex justify-between py-1 border-b border-slate-50">
+          <dt class="text-slate-600">Total Assets (Cash, Bank, AR, Stock)</dt>
+          <dd class="font-mono font-semibold text-slate-900">{{ balance_sheet.total_assets_etb }} ETB</dd>
+        </div>
+        <div class="flex justify-between py-1 border-b border-slate-50">
+          <dt class="text-slate-600">Total Liabilities (AP, VAT/Withholding Payable)</dt>
+          <dd class="font-mono text-slate-900">{{ balance_sheet.total_liabilities_etb }} ETB</dd>
+        </div>
+        <div class="flex justify-between py-1 border-b border-slate-50">
+          <dt class="text-slate-600">Retained Earnings (from P&L)</dt>
+          <dd class="font-mono text-emerald-700">{{ balance_sheet.retained_earnings_etb }} ETB</dd>
+        </div>
+        <div class="flex justify-between py-1 border-b border-slate-200 bg-slate-50 px-2 rounded">
+          <dt class="font-semibold text-slate-800">Total Equity</dt>
+          <dd class="font-mono font-bold text-slate-900">{{ balance_sheet.total_equity_etb }} ETB</dd>
+        </div>
+        <div class="flex justify-between py-2 border-t-2 border-slate-900 bg-slate-50 px-2 rounded">
+          <dt class="font-bold text-slate-900">Liabilities + Equity</dt>
+          <dd class="font-mono font-bold text-slate-900 text-base">{{ balance_sheet.total_liabilities_and_equity_etb }} ETB</dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+
+  <!-- Trial Balance Table -->
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+      <h2 class="font-semibold text-slate-800 text-sm">Trial Balance (General Ledger Accounts)</h2>
+      <span class="text-xs font-mono text-slate-500">Dr: {{ trial_balance.grand_total_debits_etb }} | Cr: {{ trial_balance.grand_total_credits_etb }}</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-sm text-slate-600">
+        <thead class="bg-slate-100 text-xs font-semibold text-slate-700 uppercase tracking-wider border-b border-slate-200">
+          <tr>
+            <th class="px-6 py-3">Account Code</th>
+            <th class="px-6 py-3">Account Name</th>
+            <th class="px-6 py-3">Category</th>
+            <th class="px-6 py-3 text-right">Debit (ETB)</th>
+            <th class="px-6 py-3 text-right">Credit (ETB)</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200">
+          {% for acc in trial_balance.accounts %}
+          <tr class="hover:bg-slate-50 transition">
+            <td class="px-6 py-3 font-mono font-medium text-slate-900">{{ acc.account_code }}</td>
+            <td class="px-6 py-3 font-medium text-slate-800">{{ acc.account_name }}</td>
+            <td class="px-6 py-3">
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700 capitalize">
+                {{ acc.category }}
+              </span>
+            </td>
+            <td class="px-6 py-3 text-right font-mono text-slate-900">{{ acc.debit_etb }}</td>
+            <td class="px-6 py-3 text-right font-mono text-slate-900">{{ acc.credit_etb }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="5" class="px-6 py-8 text-center text-slate-400 italic">No accounts initialized.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot class="bg-slate-50 font-bold border-t-2 border-slate-200">
+          <tr>
+            <td colspan="3" class="px-6 py-3.5 text-slate-900 uppercase tracking-wider text-xs">Total Trial Balance</td>
+            <td class="px-6 py-3.5 text-right font-mono text-slate-900">{{ trial_balance.grand_total_debits_etb }}</td>
+            <td class="px-6 py-3.5 text-right font-mono text-slate-900">{{ trial_balance.grand_total_credits_etb }}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

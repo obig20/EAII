@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="space-y-6">
+  <!-- Header & KPI Cards -->
+  <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div>
+      <h1 class="text-2xl font-bold text-slate-900 tracking-tight">Warehouse & Inventory Management</h1>
+      <p class="text-sm text-slate-500">የመጋዘን እና የዕቃ ክምችት ቁጥጥር | Stock on-hand, multi-warehouse valuation, and reorders</p>
+    </div>
+    <div class="flex items-center space-x-3">
+      <span class="text-xs font-semibold px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full">
+        Valuation: {{ summary.total_cost_valuation_etb }} ETB
+      </span>
+    </div>
+  </div>
+
+  <!-- KPI Badges -->
+  <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Total SKUs</div>
+      <div class="text-2xl font-bold text-slate-900 mt-1">{{ summary.total_sku_count }}</div>
+    </div>
+    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Units on Hand</div>
+      <div class="text-2xl font-bold text-slate-900 mt-1">{{ summary.total_units_on_hand }}</div>
+    </div>
+    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Inventory Cost Value</div>
+      <div class="text-2xl font-bold text-emerald-600 mt-1">{{ summary.total_cost_valuation_etb }} <span class="text-xs font-normal text-slate-400">ETB</span></div>
+    </div>
+    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Low Stock Warnings</div>
+      <div class="text-2xl font-bold {% if summary.low_stock_count > 0 %}text-rose-600{% else %}text-slate-900{% endif %} mt-1">
+        {{ summary.low_stock_count }}
+      </div>
+    </div>
+  </div>
+
+  <!-- Inventory Table -->
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+      <h2 class="font-semibold text-slate-800 text-sm">Current Stock Levels Across Warehouses</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-sm text-slate-600">
+        <thead class="bg-slate-100 text-xs font-semibold text-slate-700 uppercase tracking-wider border-b border-slate-200">
+          <tr>
+            <th class="px-6 py-3">SKU</th>
+            <th class="px-6 py-3">Product Name</th>
+            <th class="px-6 py-3">Warehouse</th>
+            <th class="px-6 py-3 text-right">Qty on Hand</th>
+            <th class="px-6 py-3 text-right">Cost Value (ETB)</th>
+            <th class="px-6 py-3 text-center">Status</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200">
+          {% for item in summary.inventory %}
+          <tr class="hover:bg-slate-50 transition">
+            <td class="px-6 py-3.5 font-mono font-medium text-slate-900">{{ item.sku }}</td>
+            <td class="px-6 py-3.5 text-slate-800">{{ item.name }}</td>
+            <td class="px-6 py-3.5 text-slate-600">{{ item.warehouse }}</td>
+            <td class="px-6 py-3.5 text-right font-semibold text-slate-900">{{ item.quantity_on_hand }} <span class="text-xs text-slate-400 font-normal">{{ item.unit }}</span></td>
+            <td class="px-6 py-3.5 text-right font-mono text-emerald-700">{{ item.cost_value_etb }}</td>
+            <td class="px-6 py-3.5 text-center">
+              {% if item.is_low_stock %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-rose-100 text-rose-800">
+                Low Stock (≤ {{ item.reorder_threshold }})
+              </span>
+              {% else %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800">
+                Adequate
+              </span>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="6" class="px-6 py-8 text-center text-slate-400 italic">No products currently registered in inventory.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="space-y-6">
+  <!-- Header & Action -->
+  <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div>
+      <h1 class="text-2xl font-bold text-slate-900 tracking-tight">Accounts Payable & Supplier Purchases</h1>
+      <p class="text-sm text-slate-500">የአቅራቢዎች ሂሳብ እና ግዢዎች | Supplier debt aging, factory orders, and invoice reconciliation</p>
+    </div>
+    <div class="flex items-center space-x-3">
+      <span class="text-xs font-semibold px-3 py-1 bg-sky-50 text-sky-700 border border-sky-200 rounded-full">
+        Total AP Debt: {{ ap_summary.total_ap_debt_etb }} ETB
+      </span>
+    </div>
+  </div>
+
+  <!-- KPI Badges -->
+  <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Active Suppliers</div>
+      <div class="text-2xl font-bold text-slate-900 mt-1">{{ suppliers|length }}</div>
+    </div>
+    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Total AP Debt</div>
+      <div class="text-2xl font-bold text-sky-700 mt-1">{{ ap_summary.total_ap_debt_etb }} <span class="text-xs font-normal text-slate-400">ETB</span></div>
+    </div>
+    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Current (0-30 Days)</div>
+      <div class="text-2xl font-bold text-slate-900 mt-1">{{ ap_summary.buckets.current_etb }} <span class="text-xs font-normal text-slate-400">ETB</span></div>
+    </div>
+    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Overdue (>30 Days)</div>
+      <div class="text-2xl font-bold {% if ap_summary.buckets.days_31_60_santim + ap_summary.buckets.days_61_90_santim + ap_summary.buckets.days_90_plus_santim > 0 %}text-rose-600{% else %}text-slate-900{% endif %} mt-1">
+        {{ ap_summary.buckets.days_31_60_etb }} <span class="text-xs font-normal text-slate-400">ETB</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Suppliers Directory Table -->
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+      <h2 class="font-semibold text-slate-800 text-sm">Supplier Accounts Directory & Terms</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-sm text-slate-600">
+        <thead class="bg-slate-100 text-xs font-semibold text-slate-700 uppercase tracking-wider border-b border-slate-200">
+          <tr>
+            <th class="px-6 py-3">Code</th>
+            <th class="px-6 py-3">Supplier Name</th>
+            <th class="px-6 py-3">Contact Person</th>
+            <th class="px-6 py-3">Phone</th>
+            <th class="px-6 py-3">Bank Details</th>
+            <th class="px-6 py-3 text-center">Payment Terms</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200">
+          {% for s in suppliers %}
+          <tr class="hover:bg-slate-50 transition">
+            <td class="px-6 py-3.5 font-mono font-medium text-slate-900">{{ s.code }}</td>
+            <td class="px-6 py-3.5 font-semibold text-slate-800">{{ s.name }}</td>
+            <td class="px-6 py-3.5 text-slate-600">{{ s.contact_person or '—' }}</td>
+            <td class="px-6 py-3.5 text-slate-600">{{ s.phone or '—' }}</td>
+            <td class="px-6 py-3.5 font-mono text-xs text-slate-600">{{ s.bank_name or '—' }} <span class="block text-slate-400">{{ s.bank_account or '' }}</span></td>
+            <td class="px-6 py-3.5 text-center text-xs text-slate-500">{{ s.payment_terms_days }} days</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="6" class="px-6 py-8 text-center text-slate-400 italic">No suppliers registered yet.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
