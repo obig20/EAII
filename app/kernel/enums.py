@@ -100,6 +100,41 @@ class StockMovementType(str, Enum):
     ADJUSTMENT = "adjustment"
 
 
+class PurchaseOrderState(str, Enum):
+    DRAFT = "draft"
+    APPROVED = "approved"
+    PARTIALLY_RECEIVED = "partially_received"
+    FULFILLED = "fulfilled"
+    CANCELLED = "cancelled"
+
+
+class PurchaseInvoiceState(str, Enum):
+    OPEN = "open"
+    PARTIALLY_PAID = "partially_paid"
+    SETTLED = "settled"
+    DISPUTED = "disputed"
+
+
+class DeliveryTripState(str, Enum):
+    PLANNED = "planned"
+    DISPATCHED = "dispatched"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+class DeliveryStopStatus(str, Enum):
+    PENDING = "pending"
+    DELIVERED = "delivered"
+    FAILED_RETURNED = "failed_returned"
+
+
+class CashHandoverStatus(str, Enum):
+    PENDING = "pending"
+    VERIFIED_MATCH = "verified_match"
+    VERIFIED_DISCREPANCY = "verified_discrepancy"
+    REJECTED = "rejected"
+
+
 # ---------------------------------------------------------------------------
 # Evidence levels that are permitted to CONFIRM a payment.
 # This set is the authoritative source used by guards.py.
