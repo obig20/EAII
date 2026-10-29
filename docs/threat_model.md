@@ -40,7 +40,7 @@ Daily Close provides Ethiopian wholesalers and distributors with daily accounts 
 │   - App Role: Non-superuser (`app`), zero DDL privileges                             │
 │   - Row-Level Security: `FORCE ROW LEVEL SECURITY` on all tenant-scoped tables        │
 │   - DB Constraint: `REVOKE UPDATE, DELETE ON events FROM app` (Append-Only Rule 4)   │
-│   - Host Filesystem: Nightly OpenSSL AES-256-CBC Encrypted Backups                   │
+│   - Host Filesystem: Nightly age X25519 Public-Key Encrypted Backups                 │
 └──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 

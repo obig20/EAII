@@ -1,4 +1,7 @@
-.PHONY: up down migrate test lint fmt shell
+.PHONY: up down migrate test lint fmt shell gate
+
+gate:
+	python -m app.cli release-gate
 
 up:
 	docker compose up -d

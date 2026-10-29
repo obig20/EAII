@@ -19,7 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.kernel.enums import MatchState
-from app.kernel.models import Invoice, PaymentLine, PaymentMatch, Retailer
+from app.kernel.models import Event, Invoice, PaymentLine, PaymentMatch, Retailer
 from app.kernel.money import to_etb
 
 
@@ -315,3 +315,67 @@ def export_accountant_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
     writer.writerow(sanitize_csv_row(["TOTAL REVERSED MATCHES", rev_count, "TOTAL REVERSED SANTIM", rev_santim, "TOTAL REVERSED ETB", to_etb(rev_santim)]))
 
     return output.getvalue()
+
+
+def export_reversals_csv(session: Session, tenant_id: uuid.UUID) -> str:
+    """
+    Dedicated CSV export for reversed matches with reason codes and timestamps.
+    """
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow(sanitize_csv_row([
+        "Match ID",
+        "Payment Line ID",
+        "Invoice Number",
+        "Retailer Name",
+        "Matched Santim",
+        "Matched ETB",
+        "Evidence Level",
+        "Reason Code",
+        "Reversed At",
+        "Reversed By",
+    ]))
+
+    events_stmt = (
+        select(Event)
+        .where(
+            Event.tenant_id == tenant_id,
+            Event.event_type == "match.reversed",
+            Event.aggregate_type == "payment_match",
+        )
+    )
+    rev_events = {e.aggregate_id: e for e in session.execute(events_stmt).scalars().all()}
+
+    reversals_stmt = (
+        select(PaymentMatch, PaymentLine, Invoice, Retailer)
+        .join(PaymentLine, PaymentMatch.payment_line_id == PaymentLine.id)
+        .join(Invoice, PaymentMatch.invoice_id == Invoice.id)
+        .join(Retailer, Invoice.retailer_id == Retailer.id)
+        .where(
+            PaymentMatch.tenant_id == tenant_id,
+            PaymentMatch.state == MatchState.REVERSED.value,
+        )
+        .order_by(PaymentMatch.created_at.desc())
+    )
+
+    for pm, pl, inv, ret in session.execute(reversals_stmt):
+        ev = rev_events.get(pm.id)
+        reason_code = ev.payload.get("reason_code", "") if ev and ev.payload else ""
+        reversed_at = ev.created_at.isoformat() if ev and ev.created_at else (pm.created_at.isoformat() if pm.created_at else "")
+        reversed_by = str(ev.actor_id) if ev and ev.actor_id else ""
+        writer.writerow(sanitize_csv_row([
+            str(pm.id),
+            str(pl.id),
+            inv.invoice_number,
+            ret.name,
+            pm.matched_santim,
+            to_etb(pm.matched_santim),
+            pl.evidence_level,
+            reason_code,
+            reversed_at,
+            reversed_by,
+        ]))
+
+    return output.getvalue()
+

@@ -78,7 +78,7 @@ from app.kernel.tenant import set_tenant
 from app.matching.matcher import PaymentMatcher
 from app.matching.normalization import normalize_phone
 from app.reports.aging import generate_aging_report
-from app.reports.exports import export_accountant_csv, export_payments_csv, export_sales_csv
+from app.reports.exports import export_accountant_csv, export_payments_csv, export_reversals_csv, export_sales_csv
 from app.reports.morning_brief import generate_morning_brief_text
 from app.settings import settings
 
@@ -1383,6 +1383,64 @@ def download_accountant_csv(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=partner_accountant_export.csv"},
     )
+
+@router.get("/exports/reversals.csv")
+def download_reversals_csv(
+    session: Session = Depends(get_session),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+):
+    """Owner-only export of all reversed payment matches with audit metadata."""
+    tenant, _ = owner_context
+    set_tenant(session, tenant.id)
+    content = export_reversals_csv(session, tenant_id=tenant.id)
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=reversals.csv"},
+    )
+
+
+@router.post("/reversals/notes/{note_id}/delete")
+def delete_reversal_note_endpoint(
+    note_id: str,
+    session: Session = Depends(get_session),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+    _csrf: None = Depends(verify_csrf),
+):
+    """
+    Owner-only deletion of a free-text reversal note.
+    Logs immutable event recording only note_id and match_id, without storing note content.
+    """
+    tenant, user = owner_context
+    set_tenant(session, tenant.id)
+    try:
+        nid = uuid.UUID(note_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid note UUID format.")
+
+    note = session.get(ReversalNote, nid)
+    if not note or note.tenant_id != tenant.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reversal note not found.")
+
+    match_id = note.payment_match_id
+    session.delete(note)
+    session.flush()
+
+    append_event(
+        session=session,
+        tenant_id=tenant.id,
+        aggregate_type="reversal_note",
+        aggregate_id=nid,
+        event_type="reversal_note.deleted",
+        payload={
+            "reversal_note_id": str(nid),
+            "payment_match_id": str(match_id),
+            "deleted_by": str(user.id),
+        },
+    )
+    session.commit()
+    return HTMLResponse("<div class='text-xs font-semibold text-slate-500'>Note deleted</div>")
+
 
 
 # ---------------------------------------------------------------------------

@@ -340,6 +340,14 @@ def cli_release_gate(args: argparse.Namespace) -> int:
             current_rev = ctx.get_current_revision()
 
         if current_rev != head_rev:
+            print(f"  [INFO] Database revision ({current_rev}) is not at head ({head_rev}). Upgrading to head...")
+            from alembic import command
+            command.upgrade(alembic_cfg, "head")
+            with engine.connect() as conn:
+                ctx = MigrationContext.configure(conn)
+                current_rev = ctx.get_current_revision()
+
+        if current_rev != head_rev:
             print(f"ERROR: Database revision ({current_rev}) does not match Alembic head ({head_rev})!", file=sys.stderr)
             return 1
         print(f"  ✓ Database schema is at Alembic head revision: {current_rev}")
@@ -348,25 +356,43 @@ def cli_release_gate(args: argparse.Namespace) -> int:
         return 1
 
     # 3. Test Suite Execution
-    print("[3/4] Running Full Test Suite under unprivileged app role...")
+    print("[3/4] Running Full Test Suite under unprivileged app role (including slow benchmarks)...")
+    import time
+    start_time = time.perf_counter()
     test_proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q"],
+        [sys.executable, "-m", "pytest", "--durations=15"],
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
     )
+    total_test_duration = time.perf_counter() - start_time
     if test_proc.returncode != 0:
         print(f"ERROR: Pytest suite failed with returncode {test_proc.returncode}:\n{test_proc.stderr or test_proc.stdout}", file=sys.stderr)
         return 1
 
-    # Extract test pass summary line
+    # Extract test pass summary line and durations
     summary_line = ""
+    durations_lines = []
+    in_durations = False
     for line in test_proc.stdout.splitlines():
+        if "slowest " in line and "durations" in line:
+            in_durations = True
+            durations_lines.append(line.strip(" ="))
+        elif in_durations:
+            if line.startswith("===") and ("passed" in line or "failed" in line):
+                in_durations = False
+            else:
+                if line.strip():
+                    durations_lines.append(line)
         if "passed" in line and ("warning" in line or "in " in line):
             summary_line = line.strip(" =")
-            break
-    print(f"  ✓ Test Suite: {summary_line}")
+
+    print(f"  ✓ Test Suite: {summary_line} (Total Wall-Clock Runtime: {total_test_duration:.2f}s)")
+    if durations_lines:
+        print("  Top Slowest Test Durations:")
+        for dl in durations_lines[:16]:
+            print(f"    {dl}")
 
     # 4. Invariant and Health Check Verification
     print("[4/4] Verifying Demo and Diagnostic Capabilities...")

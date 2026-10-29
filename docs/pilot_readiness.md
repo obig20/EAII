@@ -36,45 +36,42 @@ The Daily Close accounts receivable tracking and daily settlement reconciliation
 
 ---
 
-## 3. Adversarial Security Verification (SEC-VULN-01 to SEC-VULN-13)
+## 3. Adversarial Security Verification (SEC-VULN-01 to SEC-VULN-14)
 
-All 13 security findings from the independent adversarial review have been remediated and verified under PostgreSQL role `app` (`NOBYPASSRLS`):
+All original 13 security findings from the independent adversarial review, plus the new finding SEC-VULN-14, have been remediated and verified under PostgreSQL role `app` (`NOBYPASSRLS`):
 
-| Vulnerability ID | Description | Remediation Status | Verification Test |
-| :--- | :--- | :--- | :--- |
-| **SEC-VULN-01** | `pg_dump` failure under RLS role | **REMEDIATED** | `test_sec_vuln_01_pg_dump_under_app_role_fails_due_to_rls` |
-| **SEC-VULN-02** | Double credit via concurrent approval | **REMEDIATED** | `test_attack_double_counting_payment_line`, `test_attack_parallel_approvals_race_condition` |
-| **SEC-VULN-03** | CSV formula injection (CWE-1236) | **REMEDIATED** | `test_csv_formula_injection_in_sales_export` |
-| **SEC-VULN-04** | Telegram HTML injection / bot crash | **REMEDIATED** | `test_telegram_html_injection_in_handle_review` |
-| **SEC-VULN-05** | Proxy header IP spoofing / owner lockout | **REMEDIATED** | `test_x_forwarded_for_trusted_proxies` |
-| **SEC-VULN-06** | Argon2id login timing oracle | **REMEDIATED** | `test_dummy_argon2id_timing_normalization` |
-| **SEC-VULN-07** | Client IP address logging in event ledger | **REMEDIATED** | `test_ip_address_not_in_events_payload` |
-| **SEC-VULN-08** | Insecure production startup configuration | **REMEDIATED** | `test_production_startup_validation` |
-| **SEC-VULN-09** | Pre-auth login lookup blocked by RLS | **REMEDIATED** | `test_pre_auth_login_lookup_under_app_role` |
-| **SEC-VULN-10** | Duplicate statement ingestion | **REMEDIATED** | `test_statement_import_duplicate_row_becomes_possible_duplicate_review_item` |
-| **SEC-VULN-11** | Matching engine false confirmations | **REMEDIATED** | `test_synthetic_benchmark_10_seeds`, `test_independent_generator_10_seeds` (0 false confirmations across all seeds) |
-| **SEC-VULN-12** | Foreign key crash on unknown login account | **REMEDIATED** | `test_unknown_user_login_does_not_crash_fk` |
-| **SEC-VULN-13** | CSV upload crash on null bytes (`\x00`) | **REMEDIATED** | `test_null_bytes_in_csv_upload` |
+| Vulnerability ID | Category / Description | Severity | Remediation Summary | Verification Test |
+| :--- | :--- | :---: | :--- | :--- |
+| **SEC-VULN-01** | Database / RLS Backup (`pg_dump` failure under RLS) | High | Automated backups execute under dedicated `backup_role` with `BYPASSRLS`. Script enforces `age` asymmetric encryption. | `test_sec_vuln_01_pg_dump_under_app_role_fails_due_to_rls`, `test_task_21_backup_tamper_detection`, `test_backup_encryption_age_public_key_mode` |
+| **SEC-VULN-02** | Concurrency / Double Credit on Match Approval | Critical | Approval uses `SELECT ... FOR UPDATE` with lock ordering. Rejects already confirmed/settled items with HTTP 409. | `test_attack_double_counting_payment_line`, `test_attack_parallel_approvals_race_condition` |
+| **SEC-VULN-03** | CSV Formula Injection (CWE-1236) | High | Sanitized CSV cells prepending `'` to trigger characters (`=`, `@`, `\t`, `\r`, non-numeric `+`/`-`). Exempts valid phone numbers. | `test_csv_formula_injection_in_sales_export`, `test_csv_phone_numbers_survive_and_formulas_neutralized` |
+| **SEC-VULN-04** | Stored XSS / Telegram HTML Injection & Bot Crash | High | Dynamic fields (`retailer.name`, `raw_reference`, `invoice_number`) escaped with `html.escape()` prior to rendering with `parse_mode=HTML`. | `test_telegram_html_injection_in_handle_review` |
+| **SEC-VULN-05** | Auth / Network Spoofing & Owner Lockout DoS | High | Trust `X-Forwarded-For` / `X-Real-IP` ONLY when immediate peer is in `trusted_proxies`. Replaced blanket lockout with progressive per-(account, IP) delays. | `test_task_12_x_forwarded_for_spoofing_and_owner_lockout`, `test_cli_unlock_user` |
+| **SEC-VULN-06** | Argon2id Login Timing Oracle | Low | Normalized timing for non-existent vs existing users via dummy Argon2id hash computation. | `test_task_11_account_enumeration_via_fk_crash`, `test_dummy_argon2id_timing_normalization` |
+| **SEC-VULN-07** | Privacy / Append-Only Log (Plaintext IP in events) | Medium | IP addresses purged from immutable `events` table payloads. Ephemeral retention only in `rate_limit_buckets` and `sessions`. | `test_task_13_ip_address_stored_in_immutable_events` |
+| **SEC-VULN-08** | Production Startup Hardening | High | Pydantic `model_validator` in `Settings`: production mode strictly rejects default/short `SECRET_KEY`, `debug=True`, insecure cookies, and `DEBUG` log level. | `test_task_15_production_settings_validation_failures`, `test_task_15_valid_production_config_starts_cleanly` |
+| **SEC-VULN-09** | Multi-Tenancy / RLS Blocks Login under App Role | Critical | Strict RLS on `users`/`sessions` preserved; narrow `SECURITY DEFINER` function `lookup_user_for_auth` owned by `auth_lookup_role` used for pre-auth lookup. | `test_task_10_app_role_rls_blocks_unauthenticated_user_lookup`, `test_task_3_cross_tenant_idor_rejected` |
+| **SEC-VULN-10** | Statement Import Deduplication & Idempotency | High | Computes SHA-256 hash of statement files, prevents re-ingestion of duplicate batches, flags duplicate payment rows. | `test_statement_import_duplicate_row_becomes_possible_duplicate_review_item`, `test_batch_hash_deduplication` |
+| **SEC-VULN-11** | Matching Engine False Confirmations (Tier B amount coincidence) | Critical | Auto-confirmation restricted strictly to Tier A exact invoice token matches with equal amount and confirmable evidence (`L1`, `L2`, `L3`). Tier B and Tier C demoted to review queue as `proposed`. | `test_synthetic_benchmark_10_seeds`, `test_independent_generator_10_seeds` (0 false confirmations across 10 seeds) |
+| **SEC-VULN-12** | Foreign Key Crash on Unknown Login Identifier | High | Auth failures for unknown identifiers no longer insert dummy tenant UUIDs into `events`. Recorded in dedicated `auth_failures` table with HMAC-SHA256 identifier and no FK. | `test_task_11_account_enumeration_via_fk_crash` |
+| **SEC-VULN-13** | File Handling / CSV Null Byte DataError & XML Injection | High | Uploaded files sanitized: null bytes (`\x00`) rejected; UTF-8 validated. Migrated XLSX parser to `defusedxml` with DTD disabled defending against billion laughs and XXE. | `test_null_bytes_in_csv_upload`, `test_billion_laughs_xml_in_xlsx_blocked`, `test_utf16_encoded_xxe_in_xlsx_blocked` |
+| **SEC-VULN-14** *(NEW)* | Single-Open-Invoice Ambiguity Bypass | High | Removed single-open-invoice ambiguity bypass. If a payment reference cites an invoice token that does not exist among open invoices, it routes to review queue as `proposed` and never auto-confirms an unrelated invoice. | `test_attack_nonexistent_invoice_token_does_not_auto_confirm_unrelated` |
 
 ---
 
 ## 4. Pending Gates Before Live Pilot Deployment
 
-Live pilot deployment with consenting wholesale merchants requires completion of the following prerequisite gates:
+Live pilot deployment with consenting wholesale merchants is subject to completion of the following prerequisite gates. Each gate is currently marked **NOT DONE**:
 
-1. **Merchant Consent & Data Agreement Gate:**
-   - Formal bilateral data processing agreement signed with pilot merchant owners in Addis Ababa.
-   - Merchant-specific retailer master list audit and initial invoice opening balance reconciliation.
-2. **Cryptographic Key Management Gate:**
-   - Air-gapped offline generation of production `age` master private key (`AGE-SECRET-KEY-1...`).
-   - Secure provisioning of the public recipient key (`age1...`) to `/opt/dailyclose/backup_pubkey.txt` on the sovereign host.
-   - Physical cold-storage deposition of the recovery key in a bank safety deposit box in Addis Ababa.
-3. **SMS Gateway & Telecommunications Gate:**
-   - Production SMPP / SMS gateway account credentials provisioned with Ethio Telecom / Safaricom Ethiopia.
-   - Dedicated shortcode registration and callback webhook secrets configuration.
-4. **Physical Host Infrastructure Gate:**
-   - Linux host physical hardening, firewall lockdown (ports 80/443 only), and automated nightly backup cron setup.
-   - End-to-end disaster recovery drill from cold backup on the production server.
+| Pilot Gate Item | Requirement & Description | Current Status |
+| :--- | :--- | :---: |
+| **1. Hold-Out Accuracy Gate** | Blind hold-out dataset test demonstrating exactly zero false confirmations (0.00%) under production matching rules. | **NOT DONE** |
+| **2. Consented Real Statements Gate** | Live ingestion and reconciliation testing of two or three real bank/Telebirr statements from consenting Ethiopian merchants. | **NOT DONE** |
+| **3. HTTPS & Transport Security Gate** | TLS/HTTPS configuration with trusted certificate authority, HSTS headers, and secure cookie domain binding. | **NOT DONE** |
+| **4. Sovereign Ethiopian Hosting Gate** | Physical server provisioning and deployment on domestic infrastructure within Ethiopia (Rule 7 Data Residency). | **NOT DONE** |
+| **5. Second-Machine Restore Drill Gate** | Disaster recovery drill restoring encrypted `age` backups on an independent physical machine from bare metal. | **NOT DONE** |
+| **6. Regulatory & Licensing Compliance Gate** | Formal legal review and signed determinations on Telegram data residency, Accounting and Auditing Board of Ethiopia (AABE) licensing requirements, and Ministry of Revenue Directive 1142 Article 14 record retention. | **NOT DONE** |
+| **7. Merchant Consent & Privacy Notice Gate** | Executed bilateral merchant data consent agreements, retailer privacy disclosures, and data subject notification forms. | **NOT DONE** |
 
 ---
 
@@ -84,4 +81,4 @@ To verify complete system integrity at any time, run:
 ```bash
 python -m app.cli release-gate
 ```
-This executes the full automated test suite under the `app` role, validates Alembic migration head alignment, verifies Evidence Ladder immutability, and confirms demo and diagnostic readiness.
+This executes the full automated test suite under the unprivileged `app` role (including slow benchmarks and the 2,000-payment performance test), validates Alembic migration head alignment, verifies Evidence Ladder immutability, and confirms demo and diagnostic readiness.

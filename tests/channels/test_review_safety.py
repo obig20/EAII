@@ -889,3 +889,206 @@ class TestTelegramSafetyCallbacks:
 
         await handle_approve_callback(mock_callback)
         mock_callback.answer.assert_called_with("A reversed match can never be re-approved.", show_alert=True)
+
+
+class TestStage1ReviewQueueCorrections:
+    def test_is_previously_reversed_refused_by_matcher_and_trigger(
+        self, db_session: Session, tenant: Tenant, owner: User, retailer: Retailer
+    ):
+        from app.matching.matcher import MatchResult, PaymentMatcher
+        from app.kernel.enums import EvidenceLevel
+
+        matcher = PaymentMatcher()
+        now = datetime.now(timezone.utc)
+        inv = Invoice(
+            id=uuid.uuid4(),
+            tenant_id=tenant.id,
+            invoice_number="INV-REV-001",
+            retailer_id=retailer.id,
+            amount_santim=100000,
+            issued_date=date(2026, 10, 1),
+            due_date=date(2026, 10, 31),
+            state=InvoiceState.OPEN.value,
+            created_at=now,
+            created_by=owner.id,
+        )
+        pl = PaymentLine(
+            id=uuid.uuid4(),
+            tenant_id=tenant.id,
+            value_date=date(2026, 10, 15),
+            amount_santim=100000,
+            raw_reference="INV-REV-001",
+            counterparty_name="Retailer Corp",
+            evidence_level="L1",
+            state=PaymentState.PROPOSED.value,
+            is_previously_reversed=True,
+            created_at=now,
+        )
+        db_session.add_all([inv, pl])
+        db_session.flush()
+
+        # 1. match_payment returns "proposed", not "auto_confirmed"
+        result = matcher.match_payment(pl, [inv], [retailer])
+        assert result.status == "proposed"
+        assert "previously reversed payment" in result.reason
+
+        # 2. apply_match_results raises ValueError if forced to auto_confirm
+        forced_result = MatchResult(
+            payment_line_id=pl.id,
+            status="auto_confirmed",
+            tier=result.tier,
+            evidence_level=result.evidence_level,
+            matches=result.matches,
+        )
+        with pytest.raises(ValueError, match="Previously reversed payment cannot be auto-confirmed"):
+            matcher.apply_match_results(db_session, pl, forced_result, actor_id=owner.id)
+
+        # 3. Database trigger trg_check_no_auto_confirm_on_reversed refuses direct insert on events table
+        with pytest.raises(Exception) as exc_info:
+            with db_session.begin_nested():
+                ev = Event(
+                    id=uuid.uuid4(),
+                    tenant_id=tenant.id,
+                    event_type="payment.auto_confirmed",
+                    aggregate_type="payment_line",
+                    aggregate_id=pl.id,
+                    actor_id=owner.id,
+                    evidence_level="L1",
+                    payload={},
+                    created_at=now,
+                )
+                db_session.add(ev)
+                db_session.flush()
+        assert "previously reversed and cannot be auto-confirmed" in str(exc_info.value).lower()
+
+    def test_reversals_csv_export(
+        self, client: TestClient, db_session: Session, tenant: Tenant, owner: User, cashier: User, retailer: Retailer
+    ):
+        inv, pl, pm = create_invoice_and_match(db_session, tenant, owner, retailer, state="confirmed")
+        authenticate_client(client, db_session, owner)
+        client.post(f"/matches/{pm.id}/reverse", data={"reason_code": "wrong_invoice"})
+
+        # Cashier is blocked (403 Forbidden)
+        authenticate_client(client, db_session, cashier)
+        res_cashier = client.get("/exports/reversals.csv")
+        assert res_cashier.status_code == 403
+
+        # Owner can download CSV
+        authenticate_client(client, db_session, owner)
+        res_owner = client.get("/exports/reversals.csv")
+        assert res_owner.status_code == 200
+        assert res_owner.headers["content-type"].startswith("text/csv")
+        content = res_owner.text
+        assert "Match ID" in content
+        assert "Reason Code" in content
+        assert "wrong_invoice" in content
+        assert inv.invoice_number in content
+
+    def test_delete_reversal_note_logs_id_only_without_content(
+        self, client: TestClient, db_session: Session, tenant: Tenant, owner: User, cashier: User, retailer: Retailer
+    ):
+        inv, pl, pm = create_invoice_and_match(db_session, tenant, owner, retailer, state="confirmed")
+        authenticate_client(client, db_session, owner)
+
+        # Reverse with private sensitive free-text note
+        sensitive_note_text = "SECRET_MEMO_TAX_OFFICIAL_DISPUTE_XYZ"
+        client.post(f"/matches/{pm.id}/reverse", data={"reason_code": "other", "notes": sensitive_note_text})
+
+        # Locate reversal note in DB
+        set_tenant(db_session, tenant.id)
+        note = db_session.execute(
+            select(ReversalNote).where(ReversalNote.payment_match_id == pm.id)
+        ).scalar_one()
+        note_id = note.id
+
+        # Cashier cannot delete (403 Forbidden)
+        authenticate_client(client, db_session, cashier)
+        res_del_cashier = client.post(f"/reversals/notes/{note_id}/delete")
+        assert res_del_cashier.status_code == 403
+
+        # Owner deletes note
+        authenticate_client(client, db_session, owner)
+        res_del_owner = client.post(f"/reversals/notes/{note_id}/delete")
+        assert res_del_owner.status_code == 200
+
+        # Note is removed from reversal_notes
+        deleted_note = db_session.get(ReversalNote, note_id)
+        assert deleted_note is None
+
+        # Verify deletion event logs ID only, NEVER note content
+        events = db_session.execute(
+            select(Event).where(
+                Event.event_type == "reversal_note.deleted",
+                Event.aggregate_id == note_id,
+            )
+        ).scalars().all()
+        assert len(events) == 1
+        ev = events[0]
+        assert ev.payload["reversal_note_id"] == str(note_id)
+        assert ev.payload["payment_match_id"] == str(pm.id)
+        assert sensitive_note_text not in str(ev.payload)
+
+    def test_locale_key_parity_english_amharic(self):
+        import json
+        import pathlib
+
+        root = pathlib.Path(__file__).parents[2]
+        en_path = root / "app" / "channels" / "telegram" / "locales" / "en.json"
+        am_path = root / "app" / "channels" / "telegram" / "locales" / "am.json"
+        with open(en_path, encoding="utf-8") as f:
+            en_data = json.load(f)
+        with open(am_path, encoding="utf-8") as f:
+            am_data = json.load(f)
+
+        missing_in_am = set(en_data.keys()) - set(am_data.keys())
+        missing_in_en = set(am_data.keys()) - set(en_data.keys())
+        assert not missing_in_am, f"Keys in en.json but missing from am.json: {missing_in_am}"
+        assert not missing_in_en, f"Keys in am.json but missing from en.json: {missing_in_en}"
+
+    def test_no_external_urls_in_templates(self):
+        import glob
+        import pathlib
+        import re
+
+        root = pathlib.Path(__file__).parents[2]
+        templates_pattern = str(root / "app" / "channels" / "web" / "templates" / "**" / "*.html")
+        templates = glob.glob(templates_pattern, recursive=True)
+        assert len(templates) > 0, "No templates found to audit"
+
+        url_pattern = re.compile(r'(?:href|src)\s*=\s*[\x22\x27](?:https?:)?//', re.IGNORECASE)
+        offenses = []
+        for t in templates:
+            with open(t, encoding="utf-8") as f:
+                for idx, line in enumerate(f, 1):
+                    if url_pattern.search(line):
+                        offenses.append(f"{t}:{idx} -> {line.strip()}")
+
+        assert not offenses, f"Found external URL references in templates:\n" + "\n".join(offenses)
+
+    def test_html_escaping_of_retailer_names_in_review_screen(
+        self, client: TestClient, db_session: Session, tenant: Tenant, owner: User
+    ):
+        now = datetime.now(timezone.utc)
+        xss_retailer = Retailer(
+            id=uuid.uuid4(),
+            tenant_id=tenant.id,
+            name="<script>alert('xss')</script> Retailer",
+            phone="+251911999888",
+            created_at=now,
+        )
+        db_session.add(xss_retailer)
+        db_session.flush()
+
+        inv, pl, pm = create_invoice_and_match(
+            db_session, tenant, owner, xss_retailer, state="proposed", inv_amount_santim=250000, pl_amount_santim=250000
+        )
+        authenticate_client(client, db_session, owner)
+
+        res = client.get("/")
+        assert res.status_code == 200
+        body = res.text
+        # Must NOT contain raw unescaped script tags
+        assert "<script>alert('xss')</script>" not in body
+        # Must contain escaped HTML entities
+        assert "&lt;script&gt;alert(" in body or "&#39;xss&#39;" in body or "&apos;xss&apos;" in body
+

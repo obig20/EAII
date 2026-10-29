@@ -156,12 +156,38 @@ def upgrade() -> None:
 
         GRANT SELECT, INSERT, UPDATE, DELETE ON processed_approval_tokens TO app;
         GRANT SELECT ON processed_approval_tokens TO backup_role;
+
+        CREATE OR REPLACE FUNCTION check_no_auto_confirm_on_reversed()
+        RETURNS TRIGGER AS $$
+        DECLARE
+            v_is_reversed BOOLEAN;
+        BEGIN
+            IF NEW.event_type = 'payment.auto_confirmed' AND NEW.aggregate_type = 'payment_line' THEN
+                SELECT is_previously_reversed INTO v_is_reversed
+                FROM payment_lines
+                WHERE id = NEW.aggregate_id;
+                
+                IF v_is_reversed IS TRUE THEN
+                    RAISE EXCEPTION 'Database invariant violation: payment_line % is previously reversed and cannot be auto-confirmed', NEW.aggregate_id;
+                END IF;
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+
+        DROP TRIGGER IF EXISTS trg_check_no_auto_confirm_on_reversed ON events;
+        CREATE TRIGGER trg_check_no_auto_confirm_on_reversed
+        BEFORE INSERT ON events
+        FOR EACH ROW
+        EXECUTE FUNCTION check_no_auto_confirm_on_reversed();
     """))
 
 
 def downgrade() -> None:
     conn = op.get_bind()
     conn.execute(sa.text("""
+        DROP TRIGGER IF EXISTS trg_check_no_auto_confirm_on_reversed ON events;
+        DROP FUNCTION IF EXISTS check_no_auto_confirm_on_reversed();
         DROP POLICY IF EXISTS processed_approval_tokens_tenant_isolation ON processed_approval_tokens;
         DROP POLICY IF EXISTS reversal_notes_tenant_isolation ON reversal_notes;
     """))

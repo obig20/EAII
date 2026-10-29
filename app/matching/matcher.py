@@ -209,7 +209,7 @@ class PaymentMatcher:
                 # equal amount, and exactly ONE invoice token in reference.
                 if len(exact_amount_matches) == 1 and not is_compound_ref and len(matched_invoices) == 1:
                     target_inv = exact_amount_matches[0]
-                    can_auto = evidence in CONFIRMABLE_EVIDENCE_LEVELS
+                    can_auto = (evidence in CONFIRMABLE_EVIDENCE_LEVELS) and not getattr(payment, "is_previously_reversed", False)
                     return MatchResult(
                         payment_line_id=payment.id,
                         status="auto_confirmed" if can_auto else "proposed",
@@ -221,7 +221,9 @@ class PaymentMatcher:
                             )
                         ],
                         confidence_score=1.0,
-                        reason=f"Tier A exact match: {target_inv.invoice_number} in reference with equal amount",
+                        reason=f"Tier A exact match: {target_inv.invoice_number} in reference with equal amount" + (
+                            " (review queue: previously reversed payment)" if getattr(payment, "is_previously_reversed", False) else ""
+                        ),
                         evidence_level=evidence,
                     )
                 elif len(exact_amount_matches) == 1:
@@ -593,6 +595,9 @@ class PaymentMatcher:
             assert_confirmable(result.evidence_level)
             # Rule 3: Unambiguous verification
             assert_unambiguous([m.invoice_id for m in result.matches])
+            # Stage 1 guard: Refuse auto-confirm on previously reversed payment
+            if getattr(payment, "is_previously_reversed", False):
+                raise ValueError("Previously reversed payment cannot be auto-confirmed.")
 
             payment.state = PaymentState.CONFIRMED.value
             for m in result.matches:
