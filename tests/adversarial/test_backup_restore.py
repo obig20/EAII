@@ -109,12 +109,13 @@ class TestBackupAndDisasterRecovery:
                 "-F", "c",
             ],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         assert proc_app.returncode != 0, "pg_dump as app role unexpectedly succeeded!"
         assert (
-            "query would be affected by row-level security policy" in proc_app.stderr
-            or "permission denied" in proc_app.stderr
+            "query would be affected by row-level security policy" in proc_app.stderr.lower()
+            or "permission denied" in proc_app.stderr.lower()
         ), f"Expected RLS error in pg_dump output, got: {proc_app.stderr}"
 
         # 2. pg_dump as 'backup_role' (dedicated BYPASSRLS role) succeeds cleanly
@@ -130,7 +131,8 @@ class TestBackupAndDisasterRecovery:
                 "-f", str(backup_tmp),
             ],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         assert proc_backup.returncode == 0, f"pg_dump as backup_role failed: {proc_backup.stderr}"
         assert backup_tmp.exists() and backup_tmp.stat().st_size > 0
@@ -157,7 +159,8 @@ class TestBackupAndDisasterRecovery:
                 "-f", str(dump_file),
             ],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         assert dump_proc.returncode == 0, f"pg_dump failed: {dump_proc.stderr}"
         assert dump_file.exists() and dump_file.stat().st_size > 0
@@ -175,7 +178,8 @@ class TestBackupAndDisasterRecovery:
                 str(dump_file),
             ],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         # pg_restore exit code 0 or warnings (e.g. drop if exists non-existent tables)
         assert restore_proc.returncode in (0, 1), f"pg_restore failed: {restore_proc.stderr}"

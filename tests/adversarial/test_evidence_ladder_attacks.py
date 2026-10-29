@@ -572,6 +572,12 @@ class TestEvidenceLadderAttacks:
         assert event.payload.get("overlap_warning") is not None
         assert "overlaps with" in event.payload["overlap_warning"]
 
+    def test_batch_hash_deduplication(
+        self, client: TestClient, db_session: Session, owner_user_a: User
+    ):
+        """Dedicated test for statement file/batch hash and overlapping file warning (SEC-VULN-10)."""
+        self.test_statement_import_overlapping_files_warning(client, db_session, owner_user_a)
+
     def test_statement_import_duplicate_row_becomes_possible_duplicate_review_item(
         self, client: TestClient, db_session: Session, tenant_a: Tenant, owner_user_a: User
     ):

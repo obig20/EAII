@@ -362,6 +362,164 @@ class TestMutationSurvivors:
         with pytest.raises(TokenAlreadyUsedError):
             validate_confirmation_token(db_session, raw_token=raw_token2)
 
+    def test_mutant_11_over_allocation_check_survivor(
+        self, client: TestClient, db_session: Session, tenant_a: Tenant, owner_user_a: User
+    ):
+        """
+        Mutant 11: Removing the over-allocation check would allow confirming matches
+        whose total exceeds the payment line's amount_santim.
+        """
+        from app.kernel.tokens import generate_match_approval_token
+        from app.settings import settings
+
+        authenticate_client(client, db_session, owner_user_a)
+        now = datetime.now(timezone.utc)
+        ret = Retailer(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            name="Mutant 11 Retailer",
+            created_at=now,
+        )
+        inv1 = Invoice(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            retailer_id=ret.id,
+            invoice_number="INV-MUT-11A",
+            amount_santim=100000,
+            issued_date=date(2026, 1, 1),
+            due_date=date(2026, 1, 15),
+            state=InvoiceState.OPEN.value,
+            created_at=now,
+            created_by=owner_user_a.id,
+        )
+        inv2 = Invoice(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            retailer_id=ret.id,
+            invoice_number="INV-MUT-11B",
+            amount_santim=100000,
+            issued_date=date(2026, 1, 1),
+            due_date=date(2026, 1, 15),
+            state=InvoiceState.OPEN.value,
+            created_at=now,
+            created_by=owner_user_a.id,
+        )
+        # Payment line has only 100,000 santim total
+        pl = PaymentLine(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            amount_santim=100000,
+            value_date=date(2026, 1, 2),
+            counterparty_name="Over-allocation Tester",
+            evidence_level=EvidenceLevel.L2.value,
+            state=PaymentState.PROPOSED.value,
+            created_at=now,
+        )
+        pm1 = PaymentMatch(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            payment_line_id=pl.id,
+            invoice_id=inv1.id,
+            matched_santim=100000,
+            tier="tier_a",
+            state=MatchState.PROPOSED.value,
+            created_at=now,
+        )
+        pm2 = PaymentMatch(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            payment_line_id=pl.id,
+            invoice_id=inv2.id,
+            matched_santim=100000,
+            tier="tier_a",
+            state=MatchState.PROPOSED.value,
+            created_at=now,
+        )
+        db_session.add_all([ret, inv1, inv2, pl, pm1, pm2])
+        db_session.flush()
+
+        # Approve first match (100,000 / 100,000 allocated)
+        token1 = generate_match_approval_token(
+            settings.secret_key,
+            tenant_id=tenant_a.id,
+            user_id=owner_user_a.id,
+            match_id=pm1.id,
+            matched_santim=100000,
+            invoice_amount_santim=100000,
+            payment_amount_santim=100000,
+            match_state="proposed",
+        )
+        res1 = client.post(f"/matches/{pm1.id}/approve", data={"token": token1})
+        assert res1.status_code in (200, 303)
+
+        # Attempt to approve second match on same payment line (would over-allocate to 200,000)
+        token2 = generate_match_approval_token(
+            settings.secret_key,
+            tenant_id=tenant_a.id,
+            user_id=owner_user_a.id,
+            match_id=pm2.id,
+            matched_santim=100000,
+            invoice_amount_santim=100000,
+            payment_amount_santim=100000,
+            match_state="proposed",
+        )
+        res2 = client.post(f"/matches/{pm2.id}/approve", data={"token": token2})
+        assert res2.status_code == 409, (
+            f"Mutant 11 survived: Over-allocating payment line was permitted! Status: {res2.status_code}"
+        )
+
+    def test_mutant_previously_reversed_guard_survivor(
+        self, db_session: Session, tenant_a: Tenant, owner_user_a: User
+    ):
+        """
+        Mutant for removing the previously-reversed guard:
+        If removed, a previously reversed payment would be auto-confirmed.
+        """
+        from app.matching.matcher import MatchResult, PaymentMatcher
+
+        matcher = PaymentMatcher()
+        now = datetime.now(timezone.utc)
+        inv = Invoice(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            retailer_id=uuid.uuid4(),
+            invoice_number="INV-REV-MUT",
+            amount_santim=50000,
+            issued_date=date(2026, 1, 1),
+            due_date=date(2026, 1, 15),
+            state=InvoiceState.OPEN.value,
+            created_at=now,
+            created_by=owner_user_a.id,
+        )
+        pl = PaymentLine(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            amount_santim=50000,
+            value_date=date(2026, 1, 2),
+            counterparty_name="Reversed Tester",
+            raw_reference="INV-REV-MUT",
+            evidence_level=EvidenceLevel.L1.value,
+            state=PaymentState.PROPOSED.value,
+            is_previously_reversed=True,
+            created_at=now,
+        )
+        result = matcher.match_payment(pl, [inv], [])
+        assert result.status != "auto_confirmed", (
+            f"Mutant survived: Previously reversed payment was auto-confirmed! Status: {result.status}"
+        )
+        assert result.status == "proposed"
+
+        # Also test that apply_match_results raises ValueError if forced to auto_confirmed
+        forced_result = MatchResult(
+            payment_line_id=pl.id,
+            status="auto_confirmed",
+            tier=result.tier,
+            evidence_level=result.evidence_level,
+            matches=result.matches,
+        )
+        with pytest.raises(ValueError, match="Previously reversed payment cannot be auto-confirmed"):
+            matcher.apply_match_results(db_session, pl, forced_result, actor_id=owner_user_a.id)
+
     def test_mutant_12_statement_import_idempotency(
         self, client: TestClient, db_session: Session, owner_user_a: User
     ):

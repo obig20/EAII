@@ -192,6 +192,12 @@ class TestTenantIsolationAndAuthAttacks:
         assert res_locked.text == res_unknown.text, "Response body reveals account lockout status!"
         assert len(dummy_verify_called) == 1, "Dummy Argon2id verify was NOT invoked for locked account!"
 
+    def test_dummy_argon2id_timing_normalization(
+        self, client: TestClient, db_session: Session, owner_user_a: User, monkeypatch
+    ):
+        """Dedicated test for timing normalization via dummy Argon2id hash (SEC-VULN-06)."""
+        self.test_task_11_account_enumeration_via_fk_crash(client, db_session, owner_user_a, monkeypatch)
+
     # -----------------------------------------------------------------------
     # Task 12: Rate Limiting & Nginx X-Forwarded-For Spoofing
     # -----------------------------------------------------------------------

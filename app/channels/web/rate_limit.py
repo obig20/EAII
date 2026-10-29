@@ -1,14 +1,18 @@
 """
 app/channels/web/rate_limit.py
 
-In-memory sliding window rate limiter for public unauthenticated endpoints
-(such as the retailer balance confirmation and dispute pages).
+DEPRECATED:
+In-memory rate limiter has been replaced by database-backed persistent rate limiting
+(`app.kernel.persistent_rate_limit.check_persistent_rate_limit`) across all public
+and authenticated routes to resist process restarts and support multi-worker setups.
+This module is retained strictly for backwards compatibility in standalone unit tests.
 """
 
 from __future__ import annotations
 
 import threading
 import time
+import warnings
 from collections import defaultdict
 from typing import Callable
 
@@ -17,11 +21,17 @@ from fastapi import HTTPException, Request, status
 
 class InMemoryRateLimiter:
     """
-    Sliding window rate limiter based on client IP.
-    Thread-safe and requires no external dependency (Redis, etc.).
+    .. deprecated:: 0.2.0
+       Use `app.kernel.persistent_rate_limit.check_persistent_rate_limit` instead.
+       All application routes now exclusively use the persistent database rate limiter.
     """
 
     def __init__(self, requests_per_minute: int = 15):
+        warnings.warn(
+            "InMemoryRateLimiter is deprecated; use app.kernel.persistent_rate_limit instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.requests_per_minute = requests_per_minute
         self.window_seconds = 60.0
         self._requests: dict[str, list[float]] = defaultdict(list)
