@@ -13,7 +13,8 @@
 
   <div style="divide-y: 1px solid var(--border);">
     {% for item in proposed_items %}
-    <div class="match-card" id="match-card-{{ item.match_id or item.payment_id }}" style="padding: 1.25rem; border-bottom: 1px solid var(--border);">
+    <div class="match-card" data-testid="match-card" id="match-card-{{ item.match_id or item.payment_id }}" style="padding: 1.25rem; border-bottom: 1px solid var(--border);">
+      <div id="match-card-alert-{{ item.match_id or item.payment_id }}" class="match-card-alert" data-testid="match-card-alert-region"></div>
       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap;">
         
         <!-- Left: Match Details -->
@@ -112,6 +113,7 @@
                   hx-target="#match-card-{{ item.match_id }}"
                   hx-swap="outerHTML"
                   class="btn btn-warning"
+                  data-testid="confirm-differing-button"
                   style="width: 100%; font-weight: 800;">
                   ⚠️ Confirm Differing Match ({{ item.diff_etb }})
                 </button>
@@ -123,6 +125,7 @@
                   hx-target="#match-card-{{ item.match_id }}"
                   hx-swap="outerHTML"
                   class="btn btn-success"
+                  data-testid="confirm-match-button"
                   style="width: 100%;">
                   ✓ Confirm Match
                 </button>
@@ -137,6 +140,7 @@
                   hx-target="#match-card-{{ item.match_id or item.payment_id }}"
                   hx-swap="outerHTML"
                   class="btn btn-primary"
+                  data-testid="mark-unverified-button"
                   style="width: 100%;"
                   title="Owner override: Marks as accepted unverified. Never counted as paid in totals.">
                   Accept Unverified (L4)
@@ -152,6 +156,7 @@
                 hx-target="#match-card-{{ item.match_id or item.payment_id }}"
                 hx-swap="outerHTML"
                 class="btn btn-secondary"
+                data-testid="reject-match-button"
                 style="width: 100%;">
                 ✕ Reject Match
               </button>

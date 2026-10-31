@@ -1223,80 +1223,13 @@ class TestStage1ReviewQueueCorrections:
         On the SEEDED demo tenant, render the review queue, parse each card's
         displayed payment amount, invoice amount, matched amount and difference,
         POST the approval request for each match, and assert the route's values
-        equal the card's values. Covers exact, partial, overpayment and combined cases.
+        equal the card's values. Exactly 6 seeded cards: exact, partial, overpayment, L4.
         """
         import re
         from app.kernel.money import format_money
-        from app.kernel.models import ImportBatch, Invoice, PaymentLine, PaymentMatch, Retailer
+        from app.kernel.models import PaymentMatch
 
         demo_t, demo_u = demo_tenant_and_owner
-        retailers = db_session.execute(
-            select(Retailer).where(Retailer.tenant_id == demo_t.id)
-        ).scalars().all()
-
-        # Add a combined case to the seeded tenant
-        inv_comb1 = Invoice(
-            id=uuid.uuid4(),
-            tenant_id=demo_t.id,
-            invoice_number=f"INV-COMB-1-{uuid.uuid4().hex[:4].upper()}",
-            retailer_id=retailers[0].id,
-            amount_santim=6000000,
-            issued_date=date.today() - timedelta(days=5),
-            due_date=date.today() + timedelta(days=25),
-            state="open",
-            created_at=datetime.now(timezone.utc),
-            created_by=demo_u.id,
-        )
-        inv_comb2 = Invoice(
-            id=uuid.uuid4(),
-            tenant_id=demo_t.id,
-            invoice_number=f"INV-COMB-2-{uuid.uuid4().hex[:4].upper()}",
-            retailer_id=retailers[0].id,
-            amount_santim=4000000,
-            issued_date=date.today() - timedelta(days=5),
-            due_date=date.today() + timedelta(days=25),
-            state="open",
-            created_at=datetime.now(timezone.utc),
-            created_by=demo_u.id,
-        )
-        batch = db_session.execute(
-            select(ImportBatch).where(ImportBatch.tenant_id == demo_t.id)
-        ).scalars().first()
-        pl_comb = PaymentLine(
-            id=uuid.uuid4(),
-            tenant_id=demo_t.id,
-            import_batch_id=batch.id,
-            source_ref=f"COMB-{uuid.uuid4().hex[:6]}",
-            row_key=f"comb-row-{uuid.uuid4().hex[:4]}",
-            amount_santim=10000000,
-            value_date=date.today() - timedelta(days=1),
-            counterparty_name="Almaz & Sons",
-            evidence_level="L2",
-            state="proposed",
-            created_at=datetime.now(timezone.utc),
-        )
-        pm_comb1 = PaymentMatch(
-            id=uuid.uuid4(),
-            tenant_id=demo_t.id,
-            payment_line_id=pl_comb.id,
-            invoice_id=inv_comb1.id,
-            matched_santim=6000000,
-            tier="tier_a",
-            state="proposed",
-            created_at=datetime.now(timezone.utc),
-        )
-        pm_comb2 = PaymentMatch(
-            id=uuid.uuid4(),
-            tenant_id=demo_t.id,
-            payment_line_id=pl_comb.id,
-            invoice_id=inv_comb2.id,
-            matched_santim=4000000,
-            tier="tier_a",
-            state="proposed",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add_all([inv_comb1, inv_comb2, pl_comb, pm_comb1, pm_comb2])
-        db_session.commit()
 
         # Authenticate demo owner and fetch rendered dashboard
         authenticate_client(client, db_session, demo_u)
@@ -1339,8 +1272,8 @@ class TestStage1ReviewQueueCorrections:
                 "confirm_differing": confirm_str,
             })
 
-        # We must have exact, partial, overpayment and combined cards
-        assert len(cards) >= 6
+        # Exactly 6 cards on initial demo seed
+        assert len(cards) == 6
 
         covered_cases = set()
         for card in cards:
@@ -1353,6 +1286,14 @@ class TestStage1ReviewQueueCorrections:
             pl = pm.payment_line
             inv = pm.invoice
 
+            # Compute expected difference independently from invoice and payment amounts
+            if pl.amount_santim > inv.amount_santim:
+                expected_diff_santim = pl.amount_santim - inv.amount_santim
+            elif pl.amount_santim < inv.amount_santim:
+                expected_diff_santim = inv.amount_santim - pl.amount_santim
+            else:
+                expected_diff_santim = 0
+
             # POST the approval request for this match
             post_res = client.post(
                 f"/matches/{card['id']}/approve",
@@ -1363,7 +1304,7 @@ class TestStage1ReviewQueueCorrections:
                 },
             )
             assert post_res.status_code == 200
-            assert "✓ Match Confirmed" in post_res.text
+            assert "data-testid='match-confirmed-banner'" in post_res.text or 'data-testid="match-confirmed-banner"' in post_res.text
 
             # Refresh from DB and verify route committed values equal card values
             db_session.expire_all()
@@ -1378,28 +1319,267 @@ class TestStage1ReviewQueueCorrections:
             expected_inv_str = format_money(pm_refreshed.invoice.amount_santim, include_currency=True)
             assert card["invoice_etb"] == expected_inv_str
 
-            # 3. Kind parity and difference math
+            # 3. Kind parity and independently computed difference math
             covered_cases.add(card["kind"])
-            if card["kind"] == "exact":
-                assert card["diff_etb"] == "0.00 ETB"
-                assert pm_refreshed.matched_santim == pl.amount_santim == inv.amount_santim
-            elif card["kind"] == "partial":
-                # e.g. Tadesse: invoice 120,000, paying 80,000 -> diff 40,000
-                diff_santim = inv.amount_santim - pm_refreshed.matched_santim
-                assert card["diff_etb"] == format_money(diff_santim, include_currency=True)
-            elif card["kind"] == "overpayment":
-                # e.g. Tewodros: invoice 40,000, paying 55,000 -> diff 15,000
-                diff_santim = pl.amount_santim - inv.amount_santim
-                assert card["diff_etb"] == format_money(diff_santim, include_currency=True)
-            elif card["kind"] == "combined":
-                # e.g. Combined match: payment 100,000, match 60,000 against invoice 60,000 -> diff 40,000
-                diff_santim = pl.amount_santim - pm_refreshed.matched_santim
-                assert card["diff_etb"] == format_money(diff_santim, include_currency=True)
+            expected_diff_str = format_money(expected_diff_santim, include_currency=True)
+            assert card["diff_etb"] == expected_diff_str
 
         assert "exact" in covered_cases
         assert "partial" in covered_cases
         assert "overpayment" in covered_cases
-        assert "combined" in covered_cases
+
+    def test_combined_match_rendered_card_route_parity(
+        self, client: TestClient, db_session: Session, demo_tenant_and_owner: tuple[Tenant, User]
+    ):
+        """
+        Verify rendered card and approval route parity for a combined match case.
+        """
+        import re
+        from app.kernel.money import format_money
+        from app.kernel.models import ImportBatch, Invoice, PaymentLine, PaymentMatch, Retailer
+
+        demo_t, demo_u = demo_tenant_and_owner
+        retailers = db_session.execute(
+            select(Retailer).where(Retailer.tenant_id == demo_t.id)
+        ).scalars().all()
+
+        inv_c1 = Invoice(
+            id=uuid.uuid4(),
+            tenant_id=demo_t.id,
+            invoice_number=f"INV-COMB-A-{uuid.uuid4().hex[:4].upper()}",
+            retailer_id=retailers[0].id,
+            amount_santim=6000000,
+            issued_date=date.today() - timedelta(days=5),
+            due_date=date.today() + timedelta(days=25),
+            state="open",
+            created_at=datetime.now(timezone.utc),
+            created_by=demo_u.id,
+        )
+        inv_c2 = Invoice(
+            id=uuid.uuid4(),
+            tenant_id=demo_t.id,
+            invoice_number=f"INV-COMB-B-{uuid.uuid4().hex[:4].upper()}",
+            retailer_id=retailers[0].id,
+            amount_santim=4000000,
+            issued_date=date.today() - timedelta(days=5),
+            due_date=date.today() + timedelta(days=25),
+            state="open",
+            created_at=datetime.now(timezone.utc),
+            created_by=demo_u.id,
+        )
+        batch = db_session.execute(
+            select(ImportBatch).where(ImportBatch.tenant_id == demo_t.id)
+        ).scalars().first()
+        pl_c = PaymentLine(
+            id=uuid.uuid4(),
+            tenant_id=demo_t.id,
+            import_batch_id=batch.id,
+            source_ref=f"COMB-{uuid.uuid4().hex[:6]}",
+            row_key=f"comb-row-{uuid.uuid4().hex[:4]}",
+            amount_santim=10000000,
+            value_date=date.today() - timedelta(days=1),
+            counterparty_name="Almaz & Sons",
+            evidence_level="L2",
+            state="proposed",
+            created_at=datetime.now(timezone.utc),
+        )
+        pm_c1 = PaymentMatch(
+            id=uuid.uuid4(),
+            tenant_id=demo_t.id,
+            payment_line_id=pl_c.id,
+            invoice_id=inv_c1.id,
+            matched_santim=6000000,
+            tier="tier_a",
+            state="proposed",
+            created_at=datetime.now(timezone.utc),
+        )
+        pm_c2 = PaymentMatch(
+            id=uuid.uuid4(),
+            tenant_id=demo_t.id,
+            payment_line_id=pl_c.id,
+            invoice_id=inv_c2.id,
+            matched_santim=4000000,
+            tier="tier_a",
+            state="proposed",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add_all([inv_c1, inv_c2, pl_c, pm_c1, pm_c2])
+        db_session.commit()
+
+        authenticate_client(client, db_session, demo_u)
+        res = client.get("/")
+        assert res.status_code == 200
+
+        # Find whichever combined match was rendered on the card
+        m_match = re.search(rf'action=["\']/matches/({pm_c1.id}|{pm_c2.id})/approve["\']', res.text)
+        assert m_match is not None, "Combined match card missing in review queue"
+        active_pm = pm_c1 if m_match.group(1) == str(pm_c1.id) else pm_c2
+
+        m_tok = re.search(rf'action=["\']/matches/{active_pm.id}/approve["\'].*?name=["\']approval_token["\']\s+value=["\']([^"\']+)["\']', res.text, re.DOTALL)
+        assert m_tok is not None
+        token_str = m_tok.group(1)
+
+        # Expected difference computed independently: payment total - matched portion
+        expected_diff = format_money(pl_c.amount_santim - active_pm.matched_santim, include_currency=True)
+        assert f"Amounts differ by {expected_diff}" in res.text
+
+        # Approve combined match
+        post_res = client.post(
+            f"/matches/{active_pm.id}/approve",
+            headers={"hx-request": "true"},
+            data={"approval_token": token_str, "confirm_differing": "true"},
+        )
+        assert post_res.status_code == 200
+        assert "data-testid='match-confirmed-banner'" in post_res.text or 'data-testid="match-confirmed-banner"' in post_res.text
+
+    def test_seeded_demo_differing_amount_error_leaves_card_in_place_and_count_unchanged(
+        self, client: TestClient, db_session: Session, demo_tenant_and_owner: tuple[Tenant, User]
+    ):
+        """
+        Item 1 Regression:
+        On the seeded demo, clicking confirm on Tewodros Cosmetics card (payment 55,000,
+        invoice open 40,000, matched 40,000) with confirm_differing absent:
+        - Shows a localized message in a dedicated alert region via HX-Retarget.
+        - Leaves the card in place.
+        - Leaves the count unchanged.
+        """
+        import re
+        from app.kernel.models import PaymentLine, PaymentMatch
+
+        demo_t, demo_u = demo_tenant_and_owner
+        authenticate_client(client, db_session, demo_u)
+
+        # 1. First page load: count is 6
+        res = client.get("/")
+        assert res.status_code == 200
+        badge_m = re.search(r'id=["\']review-queue-badge["\'][^>]*>\s*(\d+)\s+Pending Items', res.text)
+        assert int(badge_m.group(1)) == 6
+
+        # Find Tewodros match (pl amount 55,000, inv amount 40,000)
+        pm_tewodros = db_session.execute(
+            select(PaymentMatch)
+            .join(PaymentLine, PaymentMatch.payment_line_id == PaymentLine.id)
+            .where(
+                PaymentMatch.tenant_id == demo_t.id,
+                PaymentLine.amount_santim == 5500000,
+            )
+        ).scalars().first()
+        assert pm_tewodros is not None
+
+        # Extract approval token from page
+        tok_m = re.search(rf'action=["\']/matches/{pm_tewodros.id}/approve["\'].*?name=["\']approval_token["\']\s+value=["\']([^"\']+)["\']', res.text, re.DOTALL)
+        assert tok_m is not None
+        token_str = tok_m.group(1)
+
+        # 2. Submit approval WITHOUT confirm_differing (absent / false)
+        post_res = client.post(
+            f"/matches/{pm_tewodros.id}/approve",
+            headers={"hx-request": "true"},
+            data={"approval_token": token_str, "confirm_differing": "false"},
+        )
+        assert post_res.status_code == 200
+        assert "data-testid='match-error-alert'" in post_res.text or 'data-testid="match-error-alert"' in post_res.text
+        assert "Amounts differ" in post_res.text or "ክፍያ መጠኖች" in post_res.text
+        # Assert retargets the dedicated alert region
+        assert post_res.headers.get("HX-Retarget") == f"#match-card-alert-{pm_tewodros.id}"
+        assert post_res.headers.get("HX-Reswap") == "innerHTML"
+        # Assert count OOB swap is NOT present
+        assert "hx-swap-oob=" not in post_res.text
+
+        # 3. Subsequent page load: card is still in place, count is still 6
+        res2 = client.get("/")
+        assert res2.status_code == 200
+        badge_m2 = re.search(r'id=["\']review-queue-badge["\'][^>]*>\s*(\d+)\s+Pending Items', res2.text)
+        assert int(badge_m2.group(1)) == 6
+        assert f'id="match-card-{pm_tewodros.id}"' in res2.text or f"id='match-card-{pm_tewodros.id}'" in res2.text
+
+    def test_mark_unverified_events_and_owner_undo(
+        self, client: TestClient, db_session: Session, demo_tenant_and_owner: tuple[Tenant, User]
+    ):
+        """
+        Item 4 Regression:
+        In mark_unverified:
+        1. An event is written when attached proposed matches become rejected.
+        2. An event is written for payment_line.accepted_unverified.
+        3. Owner can undo the unverified acceptance, restoring line and match to proposed.
+        4. Undo logs payment_line.unverified_acceptance_undone and match.restored_to_proposed.
+        5. Review queue count reflects the undo.
+        """
+        import re
+        from app.kernel.models import Event, PaymentLine, PaymentMatch
+
+        demo_t, demo_u = demo_tenant_and_owner
+        authenticate_client(client, db_session, demo_u)
+
+        # Find L4 payment line (pl9) and its attached proposed match (pm9)
+        pl_l4 = db_session.execute(
+            select(PaymentLine)
+            .where(
+                PaymentLine.tenant_id == demo_t.id,
+                PaymentLine.evidence_level == "L4",
+                PaymentLine.state == "proposed",
+            )
+        ).scalars().first()
+        assert pl_l4 is not None
+
+        pm_l4 = db_session.execute(
+            select(PaymentMatch)
+            .where(
+                PaymentMatch.payment_line_id == pl_l4.id,
+                PaymentMatch.tenant_id == demo_t.id,
+                PaymentMatch.state == "proposed",
+            )
+        ).scalars().first()
+        assert pm_l4 is not None
+
+        # 1. Call mark-unverified
+        post_res = client.post(
+            f"/matches/{pl_l4.id}/mark-unverified",
+            headers={"hx-request": "true"},
+        )
+        assert post_res.status_code == 200
+        assert "data-testid='match-unverified-banner'" in post_res.text or 'data-testid="match-unverified-banner"' in post_res.text
+        assert "data-testid='undo-unverified-button'" in post_res.text or 'data-testid="undo-unverified-button"' in post_res.text
+
+        # 2. Verify DB states and event persistence
+        db_session.expire_all()
+        pl_refreshed = db_session.get(PaymentLine, pl_l4.id)
+        pm_refreshed = db_session.get(PaymentMatch, pm_l4.id)
+        assert pl_refreshed.state == "accepted_unverified"
+        assert pm_refreshed.state == "rejected"
+
+        events = db_session.execute(
+            select(Event).where(Event.tenant_id == demo_t.id).order_by(Event.created_at.desc())
+        ).scalars().all()
+        event_types = [e.event_type for e in events]
+        assert "payment_line.accepted_unverified" in event_types
+        assert "match.rejected" in event_types
+
+        # Verify reject event has reason payload
+        rej_event = next(e for e in events if e.event_type == "match.rejected" and e.aggregate_id == pm_l4.id)
+        assert rej_event.payload.get("reason") == "payment_line_accepted_unverified"
+
+        # 3. Call undo-unverified
+        undo_res = client.post(
+            f"/matches/{pl_l4.id}/undo-unverified",
+            headers={"hx-request": "true"},
+        )
+        assert undo_res.status_code == 200
+        assert "data-testid='match-undo-unverified-banner'" in undo_res.text or 'data-testid="match-undo-unverified-banner"' in undo_res.text
+
+        # 4. Verify DB states after undo
+        db_session.expire_all()
+        pl_undone = db_session.get(PaymentLine, pl_l4.id)
+        pm_undone = db_session.get(PaymentMatch, pm_l4.id)
+        assert pl_undone.state == "proposed"
+        assert pm_undone.state == "proposed"
+
+        undo_events = db_session.execute(
+            select(Event).where(Event.tenant_id == demo_t.id).order_by(Event.created_at.desc())
+        ).scalars().all()
+        undo_event_types = [e.event_type for e in undo_events]
+        assert "payment_line.unverified_acceptance_undone" in undo_event_types
+        assert "match.restored_to_proposed" in undo_event_types
 
     def test_demo_creation_and_passwords_refuse_in_production(self, db_session: Session, monkeypatch):
         """

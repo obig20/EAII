@@ -90,15 +90,27 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["format_money"] = format_money
 
 
-def format_match_error_response(request: Request, locale_key: str, status_code: int = 400, detail: str = "") -> Response:
+def format_match_error_response(
+    request: Request,
+    locale_key: str,
+    status_code: int = 400,
+    detail: str = "",
+    match_id: str | uuid.UUID | None = None,
+) -> Response:
     lang = request.cookies.get("lang", "en")
     msg = t(locale_key, lang=lang) if locale_key else detail
     if not msg or msg == locale_key:
         msg = detail or "An error occurred."
     if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
+        headers = {}
+        target_card = str(match_id) if match_id else None
+        if target_card:
+            headers["HX-Retarget"] = f"#match-card-alert-{target_card}"
+            headers["HX-Reswap"] = "innerHTML"
         return HTMLResponse(
-            f"<div class='p-3 text-xs font-bold text-rose-800 bg-rose-50 border border-rose-200 rounded-lg'>✕ {msg}</div>",
+            f"<div data-testid='match-error-alert' class='p-3 mb-3 text-xs font-bold text-rose-800 bg-rose-50 border border-rose-200 rounded-lg'>✕ {msg}</div>",
             status_code=200,
+            headers=headers,
         )
     raise HTTPException(status_code=status_code, detail=detail or msg)
 
@@ -1054,6 +1066,7 @@ def approve_match(
                 "stale_token_error",
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Stale view or invalid token: {err_msg}",
+                match_id=pm.id,
             )
 
     prior_pl_allocated = ctx.prior_pl_allocated_santim
@@ -1064,6 +1077,7 @@ def approve_match(
             "match_already_confirmed",
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Payment line is already confirmed or fully allocated ({prior_pl_allocated}/{ctx.payment_amount_santim} santim).",
+            match_id=pm.id,
         )
 
     if ctx.invoice_open_santim <= 0:
@@ -1072,6 +1086,7 @@ def approve_match(
             "match_already_confirmed",
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Invoice {inv.invoice_number} is already fully settled.",
+            match_id=pm.id,
         )
 
     open_balance = ctx.invoice_open_santim
@@ -1082,6 +1097,7 @@ def approve_match(
             "amounts_differ_confirmation_required",
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Amounts differ (Match: {format_money(ctx.matched_santim)}, Invoice Open: {format_money(ctx.invoice_open_santim)}, Payment: {format_money(ctx.payment_amount_santim)}). Explicit confirmation required.",
+            match_id=pm.id,
         )
 
     now = datetime.now(timezone.utc)
@@ -1133,7 +1149,7 @@ def approve_match(
     rem_count = get_pending_review_queue_count(session, tenant.id)
 
     return HTMLResponse(
-        "<div class='p-3 text-xs font-bold text-emerald-800 bg-emerald-50 rounded-lg'>✓ Match Confirmed</div>"
+        "<div data-testid='match-confirmed-banner' class='p-3 text-xs font-bold text-emerald-800 bg-emerald-50 rounded-lg'>✓ Match Confirmed</div>"
         f"<span id='review-queue-badge' hx-swap-oob='true' class='badge badge-warning'>{rem_count} Pending Items</span>"
         f"<div id='kpi-review-queue' hx-swap-oob='true' class='text-2xl font-black text-amber-600 mt-1'>{rem_count}</div>"
         f"<div id='step3-review-count' hx-swap-oob='true' class='text-3xl font-black text-amber-600'>{rem_count}</div>"
@@ -1307,8 +1323,17 @@ def mark_unverified(
         raise HTTPException(status_code=404, detail="Record not found")
 
     pl.state = PaymentState.ACCEPTED_UNVERIFIED.value
+    append_event(
+        session,
+        tenant_id=tenant.id,
+        event_type="payment_line.accepted_unverified",
+        aggregate_type="payment_line",
+        aggregate_id=pl.id,
+        actor_id=user.id,
+        payload={"evidence_level": pl.evidence_level, "amount_santim": pl.amount_santim},
+    )
 
-    # Transition any attached proposed match so no dangling proposed matches linger
+    # Transition any attached proposed match so no dangling proposed matches linger and log events
     attached_matches = session.execute(
         select(PaymentMatch)
         .where(
@@ -1319,13 +1344,100 @@ def mark_unverified(
     ).scalars().all()
     for pm_item in attached_matches:
         pm_item.state = MatchState.REJECTED.value
+        append_event(
+            session,
+            tenant_id=tenant.id,
+            event_type="match.rejected",
+            aggregate_type="payment_match",
+            aggregate_id=pm_item.id,
+            actor_id=user.id,
+            payload={"reason": "payment_line_accepted_unverified", "payment_line_id": str(pl.id)},
+        )
 
     session.commit()
     rem_count = get_pending_review_queue_count(session, tenant.id)
 
     return HTMLResponse(
-        "<div class='p-3 text-xs font-bold text-purple-900 bg-purple-50 rounded-lg'>"
-        "✓ Marked Accepted Unverified (L4). Excluded from all paid reports."
+        "<div data-testid='match-unverified-banner' class='p-3 text-xs font-bold text-purple-900 bg-purple-50 rounded-lg flex items-center justify-between'>"
+        "<span>✓ Marked Accepted Unverified (L4). Excluded from all paid reports.</span>"
+        f"<form method='POST' action='/matches/{pid}/undo-unverified' style='margin: 0; display: inline-block;'>"
+        f"<button type='submit' hx-post='/matches/{pid}/undo-unverified' hx-target='#match-card-{pid}' hx-swap='outerHTML' data-testid='undo-unverified-button' class='btn btn-secondary' style='padding: 0.2rem 0.6rem; font-size: 0.75rem; margin-left: 0.5rem;'>Undo</button>"
+        "</form>"
+        "</div>"
+        f"<span id='review-queue-badge' hx-swap-oob='true' class='badge badge-warning'>{rem_count} Pending Items</span>"
+        f"<div id='kpi-review-queue' hx-swap-oob='true' class='text-2xl font-black text-amber-600 mt-1'>{rem_count}</div>"
+        f"<div id='step3-review-count' hx-swap-oob='true' class='text-3xl font-black text-amber-600'>{rem_count}</div>"
+    )
+
+
+@router.post("/matches/{match_id}/undo-unverified")
+def undo_unverified(
+    match_id: str,
+    session: Session = Depends(get_session),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+    _csrf: None = Depends(verify_csrf),
+):
+    """
+    Undo an accepted_unverified marking: restores payment line to proposed
+    and any attached rejected matches back to proposed.
+    """
+    tenant, user = owner_context
+    set_tenant(session, tenant.id)
+    try:
+        pid = uuid.UUID(match_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid ID")
+
+    pl = session.get(PaymentLine, pid)
+    if not pl:
+        pm = session.get(PaymentMatch, pid)
+        if pm:
+            pl = pm.payment_line
+
+    if not pl or pl.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="Record not found")
+
+    if pl.state != PaymentState.ACCEPTED_UNVERIFIED.value:
+        raise HTTPException(status_code=400, detail="Payment line is not in accepted_unverified state")
+
+    pl.state = PaymentState.PROPOSED.value
+    append_event(
+        session,
+        tenant_id=tenant.id,
+        event_type="payment_line.unverified_acceptance_undone",
+        aggregate_type="payment_line",
+        aggregate_id=pl.id,
+        actor_id=user.id,
+        payload={"evidence_level": pl.evidence_level, "amount_santim": pl.amount_santim},
+    )
+
+    # Restore any attached matches that were rejected by mark_unverified
+    attached_matches = session.execute(
+        select(PaymentMatch)
+        .where(
+            PaymentMatch.payment_line_id == pl.id,
+            PaymentMatch.tenant_id == tenant.id,
+            PaymentMatch.state == MatchState.REJECTED.value,
+        )
+    ).scalars().all()
+    for pm_item in attached_matches:
+        pm_item.state = MatchState.PROPOSED.value
+        append_event(
+            session,
+            tenant_id=tenant.id,
+            event_type="match.restored_to_proposed",
+            aggregate_type="payment_match",
+            aggregate_id=pm_item.id,
+            actor_id=user.id,
+            payload={"reason": "unverified_acceptance_undone", "payment_line_id": str(pl.id)},
+        )
+
+    session.commit()
+    rem_count = get_pending_review_queue_count(session, tenant.id)
+
+    return HTMLResponse(
+        "<div data-testid='match-undo-unverified-banner' class='p-3 text-xs font-bold text-slate-800 bg-slate-100 rounded-lg'>"
+        "✓ Acceptance undone. Restored to pending review."
         "</div>"
         f"<span id='review-queue-badge' hx-swap-oob='true' class='badge badge-warning'>{rem_count} Pending Items</span>"
         f"<div id='kpi-review-queue' hx-swap-oob='true' class='text-2xl font-black text-amber-600 mt-1'>{rem_count}</div>"
@@ -1361,7 +1473,7 @@ def reject_match(
     rem_count = get_pending_review_queue_count(session, tenant.id)
 
     return HTMLResponse(
-        "<div class='p-3 text-xs font-bold text-slate-500 bg-slate-100 rounded-lg'>✕ Match Rejected</div>"
+        "<div data-testid='match-rejected-banner' class='p-3 text-xs font-bold text-slate-500 bg-slate-100 rounded-lg'>✕ Match Rejected</div>"
         f"<span id='review-queue-badge' hx-swap-oob='true' class='badge badge-warning'>{rem_count} Pending Items</span>"
         f"<div id='kpi-review-queue' hx-swap-oob='true' class='text-2xl font-black text-amber-600 mt-1'>{rem_count}</div>"
         f"<div id='step3-review-count' hx-swap-oob='true' class='text-3xl font-black text-amber-600'>{rem_count}</div>"
