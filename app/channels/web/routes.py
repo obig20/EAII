@@ -20,7 +20,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import case, func, select, text
+from sqlalchemy import case, distinct, func, select, text
 from sqlalchemy.orm import Session
 
 from app.channels.web.auth_deps import (
@@ -101,6 +101,20 @@ def format_match_error_response(request: Request, locale_key: str, status_code: 
             status_code=200,
         )
     raise HTTPException(status_code=status_code, detail=detail or msg)
+
+
+def get_pending_review_queue_count(session: Session, tenant_id: uuid.UUID) -> int:
+    """
+    Compute total items awaiting review in the review queue.
+    Strictly consistent with dashboard items (one card per payment line in proposed or unmatched state).
+    """
+    return session.execute(
+        select(func.count(distinct(PaymentLine.id)))
+        .where(
+            PaymentLine.tenant_id == tenant_id,
+            PaymentLine.state.in_([PaymentState.PROPOSED.value, PaymentState.UNMATCHED.value]),
+        )
+    ).scalar_one()
 
 # File upload security limits
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB limit
@@ -1116,13 +1130,7 @@ def approve_match(
     )
 
     session.commit()
-    rem_count = session.execute(
-        select(func.count(PaymentMatch.id))
-        .where(
-            PaymentMatch.tenant_id == tenant.id,
-            PaymentMatch.state == MatchState.PROPOSED.value,
-        )
-    ).scalar_one()
+    rem_count = get_pending_review_queue_count(session, tenant.id)
 
     return HTMLResponse(
         "<div class='p-3 text-xs font-bold text-emerald-800 bg-emerald-50 rounded-lg'>✓ Match Confirmed</div>"
@@ -1299,15 +1307,21 @@ def mark_unverified(
         raise HTTPException(status_code=404, detail="Record not found")
 
     pl.state = PaymentState.ACCEPTED_UNVERIFIED.value
-    session.commit()
 
-    rem_count = session.execute(
-        select(func.count(PaymentMatch.id))
+    # Transition any attached proposed match so no dangling proposed matches linger
+    attached_matches = session.execute(
+        select(PaymentMatch)
         .where(
+            PaymentMatch.payment_line_id == pl.id,
             PaymentMatch.tenant_id == tenant.id,
             PaymentMatch.state == MatchState.PROPOSED.value,
         )
-    ).scalar_one()
+    ).scalars().all()
+    for pm_item in attached_matches:
+        pm_item.state = MatchState.REJECTED.value
+
+    session.commit()
+    rem_count = get_pending_review_queue_count(session, tenant.id)
 
     return HTMLResponse(
         "<div class='p-3 text-xs font-bold text-purple-900 bg-purple-50 rounded-lg'>"
@@ -1344,13 +1358,7 @@ def reject_match(
             pl.state = PaymentState.REJECTED.value
 
     session.commit()
-    rem_count = session.execute(
-        select(func.count(PaymentMatch.id))
-        .where(
-            PaymentMatch.tenant_id == tenant.id,
-            PaymentMatch.state == MatchState.PROPOSED.value,
-        )
-    ).scalar_one()
+    rem_count = get_pending_review_queue_count(session, tenant.id)
 
     return HTMLResponse(
         "<div class='p-3 text-xs font-bold text-slate-500 bg-slate-100 rounded-lg'>✕ Match Rejected</div>"

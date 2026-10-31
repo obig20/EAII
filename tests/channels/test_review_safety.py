@@ -1215,6 +1215,192 @@ class TestStage1ReviewQueueCorrections:
         assert ctx_comb1.matched_santim == 6000000
         assert ctx_comb1.payment_amount_santim == 10000000
 
+    def test_seeded_demo_rendered_cards_equal_approval_route_values(
+        self, client: TestClient, db_session: Session, demo_tenant_and_owner: tuple[Tenant, User]
+    ):
+        """
+        Stage 0A Regression:
+        On the SEEDED demo tenant, render the review queue, parse each card's
+        displayed payment amount, invoice amount, matched amount and difference,
+        POST the approval request for each match, and assert the route's values
+        equal the card's values. Covers exact, partial, overpayment and combined cases.
+        """
+        import re
+        from app.kernel.money import format_money
+        from app.kernel.models import ImportBatch, Invoice, PaymentLine, PaymentMatch, Retailer
+
+        demo_t, demo_u = demo_tenant_and_owner
+        retailers = db_session.execute(
+            select(Retailer).where(Retailer.tenant_id == demo_t.id)
+        ).scalars().all()
+
+        # Add a combined case to the seeded tenant
+        inv_comb1 = Invoice(
+            id=uuid.uuid4(),
+            tenant_id=demo_t.id,
+            invoice_number=f"INV-COMB-1-{uuid.uuid4().hex[:4].upper()}",
+            retailer_id=retailers[0].id,
+            amount_santim=6000000,
+            issued_date=date.today() - timedelta(days=5),
+            due_date=date.today() + timedelta(days=25),
+            state="open",
+            created_at=datetime.now(timezone.utc),
+            created_by=demo_u.id,
+        )
+        inv_comb2 = Invoice(
+            id=uuid.uuid4(),
+            tenant_id=demo_t.id,
+            invoice_number=f"INV-COMB-2-{uuid.uuid4().hex[:4].upper()}",
+            retailer_id=retailers[0].id,
+            amount_santim=4000000,
+            issued_date=date.today() - timedelta(days=5),
+            due_date=date.today() + timedelta(days=25),
+            state="open",
+            created_at=datetime.now(timezone.utc),
+            created_by=demo_u.id,
+        )
+        batch = db_session.execute(
+            select(ImportBatch).where(ImportBatch.tenant_id == demo_t.id)
+        ).scalars().first()
+        pl_comb = PaymentLine(
+            id=uuid.uuid4(),
+            tenant_id=demo_t.id,
+            import_batch_id=batch.id,
+            source_ref=f"COMB-{uuid.uuid4().hex[:6]}",
+            row_key=f"comb-row-{uuid.uuid4().hex[:4]}",
+            amount_santim=10000000,
+            value_date=date.today() - timedelta(days=1),
+            counterparty_name="Almaz & Sons",
+            evidence_level="L2",
+            state="proposed",
+            created_at=datetime.now(timezone.utc),
+        )
+        pm_comb1 = PaymentMatch(
+            id=uuid.uuid4(),
+            tenant_id=demo_t.id,
+            payment_line_id=pl_comb.id,
+            invoice_id=inv_comb1.id,
+            matched_santim=6000000,
+            tier="tier_a",
+            state="proposed",
+            created_at=datetime.now(timezone.utc),
+        )
+        pm_comb2 = PaymentMatch(
+            id=uuid.uuid4(),
+            tenant_id=demo_t.id,
+            payment_line_id=pl_comb.id,
+            invoice_id=inv_comb2.id,
+            matched_santim=4000000,
+            tier="tier_a",
+            state="proposed",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add_all([inv_comb1, inv_comb2, pl_comb, pm_comb1, pm_comb2])
+        db_session.commit()
+
+        # Authenticate demo owner and fetch rendered dashboard
+        authenticate_client(client, db_session, demo_u)
+        res = client.get("/")
+        assert res.status_code == 200
+
+        # Parse match cards from HTML
+        card_blocks = res.text.split('class="match-card"')
+        cards = []
+        for block in card_blocks[1:]:
+            m_id = re.search(r'id=["\']match-card-([a-f0-9\-]+)["\']', block)
+            if not m_id:
+                continue
+            card_id = m_id.group(1)
+            m_pay = re.search(r'<span style="font-size: 1\.15rem;[^>]*>\s*([^<\n]+)', block)
+            payment_str = m_pay.group(1).strip() if m_pay else ""
+
+            m_inv_amt = re.search(r'Amount:\s*<strong>([^<]+)</strong>', block)
+            inv_amt_str = m_inv_amt.group(1).strip() if m_inv_amt else ""
+
+            m_diff = re.search(r'Amounts differ by\s*([^(\s<]+(?:\s+ETB)?)', block)
+            diff_str = m_diff.group(1).strip() if m_diff else "0.00 ETB"
+
+            m_kind = re.search(r'Amounts differ by [^\(]+\((Exact|Partial|Overpayment|Combined)\)', block, re.IGNORECASE)
+            card_kind = m_kind.group(1).lower() if m_kind else "exact"
+
+            m_tok = re.search(r'name=["\']approval_token["\']\s+value=["\']([^"\']+)["\']', block)
+            token_str = m_tok.group(1).strip() if m_tok else ""
+
+            m_cd = re.search(r'name=["\']confirm_differing["\']\s+value=["\']([^"\']+)["\']', block)
+            confirm_str = m_cd.group(1).strip() if m_cd else "false"
+
+            cards.append({
+                "id": card_id,
+                "kind": card_kind,
+                "payment_etb": payment_str,
+                "invoice_etb": inv_amt_str,
+                "diff_etb": diff_str,
+                "token": token_str,
+                "confirm_differing": confirm_str,
+            })
+
+        # We must have exact, partial, overpayment and combined cards
+        assert len(cards) >= 6
+
+        covered_cases = set()
+        for card in cards:
+            if not card["token"]:
+                continue  # L4 card has no approval token (owner override only)
+
+            card_uuid = uuid.UUID(card["id"])
+            pm = db_session.get(PaymentMatch, card_uuid)
+            assert pm is not None
+            pl = pm.payment_line
+            inv = pm.invoice
+
+            # POST the approval request for this match
+            post_res = client.post(
+                f"/matches/{card['id']}/approve",
+                headers={"hx-request": "true"},
+                data={
+                    "approval_token": card["token"],
+                    "confirm_differing": card["confirm_differing"],
+                },
+            )
+            assert post_res.status_code == 200
+            assert "✓ Match Confirmed" in post_res.text
+
+            # Refresh from DB and verify route committed values equal card values
+            db_session.expire_all()
+            pm_refreshed = db_session.get(PaymentMatch, card_uuid)
+            assert pm_refreshed.state == "confirmed"
+
+            # 1. Payment amount parity
+            expected_pay_str = format_money(pm_refreshed.payment_line.amount_santim, include_currency=True)
+            assert card["payment_etb"] == expected_pay_str
+
+            # 2. Invoice amount parity
+            expected_inv_str = format_money(pm_refreshed.invoice.amount_santim, include_currency=True)
+            assert card["invoice_etb"] == expected_inv_str
+
+            # 3. Kind parity and difference math
+            covered_cases.add(card["kind"])
+            if card["kind"] == "exact":
+                assert card["diff_etb"] == "0.00 ETB"
+                assert pm_refreshed.matched_santim == pl.amount_santim == inv.amount_santim
+            elif card["kind"] == "partial":
+                # e.g. Tadesse: invoice 120,000, paying 80,000 -> diff 40,000
+                diff_santim = inv.amount_santim - pm_refreshed.matched_santim
+                assert card["diff_etb"] == format_money(diff_santim, include_currency=True)
+            elif card["kind"] == "overpayment":
+                # e.g. Tewodros: invoice 40,000, paying 55,000 -> diff 15,000
+                diff_santim = pl.amount_santim - inv.amount_santim
+                assert card["diff_etb"] == format_money(diff_santim, include_currency=True)
+            elif card["kind"] == "combined":
+                # e.g. Combined match: payment 100,000, match 60,000 against invoice 60,000 -> diff 40,000
+                diff_santim = pl.amount_santim - pm_refreshed.matched_santim
+                assert card["diff_etb"] == format_money(diff_santim, include_currency=True)
+
+        assert "exact" in covered_cases
+        assert "partial" in covered_cases
+        assert "overpayment" in covered_cases
+        assert "combined" in covered_cases
+
     def test_demo_creation_and_passwords_refuse_in_production(self, db_session: Session, monkeypatch):
         """
         Verify that create_demo_tenant and reset_demo_tenant refuse to run
@@ -1234,21 +1420,130 @@ class TestStage1ReviewQueueCorrections:
             reset_demo_tenant(db_session, uuid.uuid4())
 
     def test_review_queue_count_decrements_and_syncs_with_cards(
-        self, client: TestClient, db_session: Session, tenant: Tenant, owner: User, retailer: Retailer
+        self, client: TestClient, db_session: Session, demo_tenant_and_owner: tuple[Tenant, User]
     ):
         """
-        Verify that approving or rejecting a match returns out-of-band updates
-        for the review queue count, keeping the badge and KPI card in sync.
+        Stage 0A Regression:
+        Verify that:
+        1. Badge count strictly equals the number of rendered cards on first load.
+        2. After each approve, reject, and mark-unverified, the swapped OOB count
+           strictly equals the remaining cards in the DOM.
         """
-        inv, pl, pm = create_invoice_and_match(
-            db_session, tenant, owner, retailer, state="proposed", inv_amount_santim=3500000, pl_amount_santim=3500000, matched_santim=3500000
-        )
-        authenticate_client(client, db_session, owner)
+        import re
+        from app.kernel.models import PaymentLine, PaymentMatch
 
-        res = client.post(f"/matches/{pm.id}/approve", headers={"hx-request": "true"})
+        demo_t, demo_u = demo_tenant_and_owner
+        authenticate_client(client, db_session, demo_u)
+
+        # 1. First page load: assert badge count equals rendered cards
+        res = client.get("/")
         assert res.status_code == 200
-        assert "hx-swap-oob=" in res.text
-        assert "id='review-queue-badge'" in res.text or 'id="review-queue-badge"' in res.text
-        assert "id='kpi-review-queue'" in res.text or 'id="kpi-review-queue"' in res.text
+
+        badge_m = re.search(r'id=["\']review-queue-badge["\'][^>]*>\s*(\d+)\s+Pending Items', res.text)
+        assert badge_m is not None, "Badge element missing on dashboard"
+        badge_count = int(badge_m.group(1))
+
+        kpi_m = re.search(r'id=["\']kpi-review-queue["\'][^>]*>\s*(\d+)\s*<', res.text)
+        assert kpi_m is not None
+        kpi_count = int(kpi_m.group(1))
+
+        step3_m = re.search(r'id=["\']step3-review-count["\'][^>]*>\s*(\d+)\s*<', res.text)
+        assert step3_m is not None
+        step3_count = int(step3_m.group(1))
+
+        rendered_cards = re.findall(r'class=["\']match-card["\']', res.text)
+        card_count = len(rendered_cards)
+
+        # On first load, all indicators must exactly equal rendered cards
+        assert card_count == 6
+        assert badge_count == card_count
+        assert kpi_count == card_count
+        assert step3_count == card_count
+
+        # Fetch lines & matches for test actions
+        pms = db_session.execute(
+            select(PaymentMatch)
+            .where(
+                PaymentMatch.tenant_id == demo_t.id,
+                PaymentMatch.state == "proposed",
+            )
+            .order_by(PaymentMatch.created_at.asc())
+        ).scalars().all()
+        pm_approve = pms[0]
+        pm_reject = pms[1]
+
+        pl_l4 = db_session.execute(
+            select(PaymentLine)
+            .where(
+                PaymentLine.tenant_id == demo_t.id,
+                PaymentLine.evidence_level == "L4",
+                PaymentLine.state == "proposed",
+            )
+        ).scalars().first()
+        assert pl_l4 is not None
+
+        # 2. Action A: Approve match
+        # Extract approval token for pm_approve from rendered HTML
+        tok_m = re.search(rf'action=["\']/matches/{pm_approve.id}/approve["\'].*?name=["\']approval_token["\']\s+value=["\']([^"\']+)["\']', res.text, re.DOTALL)
+        assert tok_m is not None
+        approve_token = tok_m.group(1)
+
+        res_appr = client.post(
+            f"/matches/{pm_approve.id}/approve",
+            headers={"hx-request": "true"},
+            data={"approval_token": approve_token, "confirm_differing": "false"},
+        )
+        assert res_appr.status_code == 200
+        assert "hx-swap-oob=" in res_appr.text
+        assert "id='review-queue-badge'" in res_appr.text or 'id="review-queue-badge"' in res_appr.text
+        assert "id='kpi-review-queue'" in res_appr.text or 'id="kpi-review-queue"' in res_appr.text
+        assert "id='step3-review-count'" in res_appr.text or 'id="step3-review-count"' in res_appr.text
+
+        appr_badge = re.search(r'id=["\']review-queue-badge["\'][^>]*>\s*(\d+)\s+Pending Items', res_appr.text)
+        appr_kpi = re.search(r'id=["\']kpi-review-queue["\'][^>]*>\s*(\d+)\s*<', res_appr.text)
+        appr_step3 = re.search(r'id=["\']step3-review-count["\'][^>]*>\s*(\d+)\s*<', res_appr.text)
+        assert int(appr_badge.group(1)) == 5
+        assert int(appr_kpi.group(1)) == 5
+        assert int(appr_step3.group(1)) == 5
+
+        # 3. Action B: Reject match
+        res_rej = client.post(
+            f"/matches/{pm_reject.id}/reject",
+            headers={"hx-request": "true"},
+        )
+        assert res_rej.status_code == 200
+        assert "hx-swap-oob=" in res_rej.text
+        rej_badge = re.search(r'id=["\']review-queue-badge["\'][^>]*>\s*(\d+)\s+Pending Items', res_rej.text)
+        rej_kpi = re.search(r'id=["\']kpi-review-queue["\'][^>]*>\s*(\d+)\s*<', res_rej.text)
+        rej_step3 = re.search(r'id=["\']step3-review-count["\'][^>]*>\s*(\d+)\s*<', res_rej.text)
+        assert int(rej_badge.group(1)) == 4
+        assert int(rej_kpi.group(1)) == 4
+        assert int(rej_step3.group(1)) == 4
+
+        # 4. Action C: Mark unverified on L4 line
+        res_unv = client.post(
+            f"/matches/{pl_l4.id}/mark-unverified",
+            headers={"hx-request": "true"},
+        )
+        assert res_unv.status_code == 200
+        assert "hx-swap-oob=" in res_unv.text
+        unv_badge = re.search(r'id=["\']review-queue-badge["\'][^>]*>\s*(\d+)\s+Pending Items', res_unv.text)
+        unv_kpi = re.search(r'id=["\']kpi-review-queue["\'][^>]*>\s*(\d+)\s*<', res_unv.text)
+        unv_step3 = re.search(r'id=["\']step3-review-count["\'][^>]*>\s*(\d+)\s*<', res_unv.text)
+        assert int(unv_badge.group(1)) == 3
+        assert int(unv_kpi.group(1)) == 3
+        assert int(unv_step3.group(1)) == 3
+
+        # 5. Subsequent GET /: page load remains in perfect sync with 3 cards
+        res_subsequent = client.get("/")
+        assert res_subsequent.status_code == 200
+        sub_badge = re.search(r'id=["\']review-queue-badge["\'][^>]*>\s*(\d+)\s+Pending Items', res_subsequent.text)
+        sub_kpi = re.search(r'id=["\']kpi-review-queue["\'][^>]*>\s*(\d+)\s*<', res_subsequent.text)
+        sub_step3 = re.search(r'id=["\']step3-review-count["\'][^>]*>\s*(\d+)\s*<', res_subsequent.text)
+        sub_cards = re.findall(r'class=["\']match-card["\']', res_subsequent.text)
+        assert int(sub_badge.group(1)) == 3
+        assert int(sub_kpi.group(1)) == 3
+        assert int(sub_step3.group(1)) == 3
+        assert len(sub_cards) == 3
 
 

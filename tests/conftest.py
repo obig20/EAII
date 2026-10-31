@@ -261,3 +261,33 @@ def client(db_session: Session):
     app.dependency_overrides.clear()
 
 
+@pytest.fixture
+def demo_tenant_and_owner(db_session: Session) -> tuple[Tenant, User]:
+    from app.demo.generator import seed_demo_data
+    from app.kernel.enums import UserRole
+    now = _now()
+    t = Tenant(
+        id=uuid.uuid4(),
+        name="Addis Wholesale Demo / አዲስ ጅምላ ማሳያ",
+        is_demo=True,
+        created_at=now,
+    )
+    u = User(
+        id=uuid.uuid4(),
+        tenant_id=t.id,
+        role=UserRole.OWNER.value,
+        phone="+251911999901",
+        email=f"demo.owner.{uuid.uuid4().hex[:6]}@dailyclose.et",
+        display_name="Ato Demo Owner",
+        password_hash="dummy",
+        is_active=True,
+        created_at=now,
+    )
+    db_session.add_all([t, u])
+    db_session.flush()
+    set_tenant(db_session, t.id)
+    seed_demo_data(db_session, t, u)
+    return t, u
+
+
+
