@@ -1,43 +1,82 @@
 <div class="card">
   <div class="card-header">
     <div>
-      <h3 class="card-title">Daily Close Step 3: Proposed Matches (Review Queue)</h3>
-      <p style="font-size: 0.75rem; color: var(--text-muted);">
+      <h3 class="card-title" style="display: flex; align-items: center; gap: 0.5rem;">
+        <svg class="icon" viewBox="0 0 24 24" style="color: var(--color-primary);"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L10 12.17l7.59-7.59L19 6l-9 11z"/></svg>
+        {% if lang == 'am' %}የክፍያ ማዛመጃዎች ግምገማ <!-- needs native review -->{% else %}Suggested Matches (Review Queue){% endif %}
+      </h3>
+      <p style="font-size: 0.75rem; color: var(--color-text-muted);">
+        {% if lang == 'am' %}
+        የባለቤት ብቻ ግምገማ። እባክዎ የቀረቡትን ክፍያዎች አንድ በአንድ ያረጋግጡ። <!-- needs native review -->
+        {% else %}
         Owner-only reconciliation review. Approvals are strictly one at a time.
+        {% endif %}
       </p>
     </div>
-    <span id="review-queue-badge" class="badge badge-warning">
-      {{ proposed_items|length }} Pending Items
+    <span id="review-queue-badge" class="badge {% if proposed_items %}badge-warning{% else %}badge-success{% endif %}">
+      {{ proposed_items|length }} {% if lang == 'am' %}የሚገመገሙ{% else %}Pending Items{% endif %}
     </span>
   </div>
 
-  <div style="divide-y: 1px solid var(--border);">
+  <div>
     {% for item in proposed_items %}
-    <div class="match-card" data-testid="match-card" id="match-card-{{ item.match_id or item.payment_id }}" style="padding: 1.25rem; border-bottom: 1px solid var(--border);">
+    <div class="match-card" data-testid="match-card" id="match-card-{{ item.match_id or item.payment_id }}" style="padding: 1.25rem; border-bottom: 1px solid var(--color-border-subtle);">
       <div id="match-card-alert-{{ item.match_id or item.payment_id }}" class="match-card-alert" data-testid="match-card-alert-region"></div>
+      
+      <!-- Progress indicator within review items -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+        <span style="font-size: 0.75rem; font-weight: 700; color: var(--color-text-muted);">
+          Match {{ loop.index }} of {{ proposed_items|length }}
+        </span>
+        <div style="display: flex; gap: 0.35rem;">
+          <button type="button" class="btn btn-secondary" style="min-height: 28px; padding: 0.15rem 0.5rem; font-size: 0.7rem;" onclick="const el = document.getElementById('match-card-{{ item.match_id or item.payment_id }}'); el.parentNode.appendChild(el);">
+            Skip for Now ↓
+          </button>
+        </div>
+      </div>
+
       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap;">
         
         <!-- Left: Match Details -->
         <div style="flex: 1; min-width: 280px;">
           <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap;">
-            <span class="badge {% if item.evidence_level == 'L4' %}badge-l4{% else %}badge-l1{% endif %}">
-              Evidence: {{ item.evidence_level }}
+            
+            <!-- Plain-Language Evidence Badges (Replacing L1-L4 jargon) -->
+            <span class="badge {% if item.evidence_level == 'L4' %}badge-unverified{% elif item.evidence_level == 'L1' %}badge-success{% else %}badge-info{% endif %}">
+              {% if item.evidence_level == 'L1' %}
+                {% if lang == 'am' %}በክፍያ አቅራቢው የተረጋገጠ <!-- needs native review -->{% else %}Confirmed by payment provider{% endif %}
+              {% elif item.evidence_level == 'L2' %}
+                {% if lang == 'am' %}በባንክ መግለጫ ላይ የተገኘ <!-- needs native review -->{% else %}Found on bank statement{% endif %}
+              {% elif item.evidence_level == 'L3' %}
+                {% if lang == 'am' %}በደንበኛው በቀጥታ የተረጋገጠ <!-- needs native review -->{% else %}Confirmed directly by customer{% endif %}
+              {% elif item.evidence_level == 'L4' %}
+                {% if lang == 'am' %}ያልተረጋገጠ የደረሰኝ ፎቶ / ስክሪንሾት <!-- needs native review -->{% else %}Unverified receipt photo / screenshot{% endif %}
+              {% else %}
+                Evidence: {{ item.evidence_level }}
+              {% endif %}
             </span>
-            <span style="font-size: 1.15rem; font-weight: 800; color: var(--primary);">
+
+            <span style="font-size: 1.15rem; font-weight: 800; color: var(--color-primary);">
               {{ item.amount_etb }}
             </span>
-            <span style="font-size: 0.75rem; color: var(--text-muted);">
+            <span style="font-size: 0.75rem; color: var(--color-text-muted);">
               Value Date: {{ item.value_date }}
             </span>
+
             {% if item.is_previously_reversed %}
-            <span class="badge badge-warning">Previously Reversed</span>
+            <span class="badge badge-warning">
+              {% if lang == 'am' %}ከዚህ በፊት የተሰረዘ ማዛመጃ <!-- needs native review -->{% else %}Previously reversed match (review needed){% endif %}
+            </span>
             {% endif %}
+
             {% if item.relied_on_l3 %}
-            <span class="badge badge-warning">⚠️ Relied on L3 Retailer Confirmation</span>
+            <span class="badge badge-warning">
+              {% if lang == 'am' %}በደንበኛው ማረጋገጫ ላይ የተመሰረተ <!-- needs native review -->{% else %}Relied on customer confirmation{% endif %}
+            </span>
             {% endif %}
           </div>
 
-          <div style="font-size: 0.85rem; margin-bottom: 0.25rem;">
+          <div style="font-size: 0.875rem; margin-bottom: 0.25rem;">
             Retailer: <strong>{{ item.retailer_name }}</strong>
             {% if item.retailer_phone and item.retailer_phone != 'N/A' %}
             · Phone: <code>{{ item.retailer_phone }}</code>
@@ -47,58 +86,72 @@
             {% endif %}
           </div>
 
-          <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.35rem;">
+          <div style="font-size: 0.8125rem; color: var(--color-text-muted); margin-bottom: 0.35rem;">
             Target Invoice: <strong>{{ item.target_invoice_numbers }}</strong>
             {% if item.target_invoice %}
             (Amount: <strong>{{ item.invoice_amount_etb }}</strong>, Issued: {{ item.invoice_issued_date }}, Due: {{ item.invoice_due_date }})
             {% endif %}
           </div>
 
-          <div style="font-size: 0.75rem; font-style: italic; color: var(--text-muted); margin-bottom: 0.5rem;">
+          <div style="font-size: 0.75rem; font-style: italic; color: var(--color-text-muted); margin-bottom: 0.5rem;">
             Raw Reference: "{{ item.raw_reference or 'None' }}"
           </div>
 
-          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.375rem; padding: 0.4rem 0.65rem; font-size: 0.75rem; color: #334155; margin-bottom: 0.5rem;">
-            💡 <strong>Why it matched:</strong> {{ item.reason }}
+          <!-- "Why we think so" Plain Reason -->
+          <div style="background: #f8fafc; border: 1px solid var(--color-border-subtle); border-radius: var(--radius-sm); padding: 0.45rem 0.75rem; font-size: 0.8125rem; color: #334155; margin-bottom: 0.5rem;">
+            <strong style="color: var(--color-text-main);">
+              {% if lang == 'am' %}ይህ የተመረጠበት ምክንያት፡ <!-- needs native review -->{% else %}Why it matched (Why we think so):{% endif %}
+            </strong> {{ item.reason }}
           </div>
 
-          <!-- Differing Amount Warning -->
+          <!-- Differing Amount Warning with Exact Plain-Language Credit Wording -->
           {% if item.is_differing %}
           <div class="diff-warning">
             ⚠️ Amounts differ by {{ item.diff_etb }} ({{ item.match_kind|capitalize }})
             <span style="display:none;" aria-hidden="true">Amounts differ by {{ item.diff_raw_etb }} ({{ item.match_kind|capitalize }})</span>
             {% if item.unallocated_credit_santim > 0 %}
-            <div style="font-size: 0.75rem; margin-top: 0.25rem; font-weight: normal;">
-              Unallocated Credit Remainder: <strong>{{ item.unallocated_credit_etb }}</strong> (tracked on retailer, never auto-applied).
+            <div class="unallocated-credit-note">
+              Unallocated Credit Remainder: <strong>{{ item.unallocated_credit_etb }}</strong>
+              ({% if lang == 'am' %}እንደተቀማጭ ክሬዲት ይቀመጣል፤ ለሌላ ደረሰኝ አይውልም <!-- needs native review -->{% else %}kept on file as credit, not applied to other invoices{% endif %}).
               <span style="display:none;" aria-hidden="true">Unallocated Credit Remainder: <strong>{{ item.unallocated_credit_raw_etb }}</strong></span>
             </div>
             {% endif %}
           </div>
           {% endif %}
 
-          <!-- Alternative Candidate Invoices -->
+          <!-- Alternative Candidate Invoices (Collapsed by Default) -->
           {% if item.alternative_candidates and item.alternative_candidates|length > 0 %}
-          <div class="alt-candidates">
-            <strong>Alternative Open Invoices (Same Tenant):</strong>
-            <ul style="margin-left: 1.2rem; margin-top: 0.25rem; list-style-type: disc;">
+          <details class="alt-candidates" style="cursor: pointer;">
+            <summary style="font-weight: 700; color: var(--color-text-main);">
+              {% if lang == 'am' %}
+              ሌሎች ክፍት ደረሰኞች ({{ item.alternative_candidates|length }}) <!-- needs native review -->
+              {% else %}
+              Other possible invoices for this customer or others ({{ item.alternative_candidates|length }})
+              {% endif %}
+            </summary>
+            <ul style="margin-left: 1.2rem; margin-top: 0.5rem; list-style-type: disc;">
               {% for alt in item.alternative_candidates %}
-              <li>
+              <li style="margin-bottom: 0.35rem;">
                 <strong>{{ alt.invoice_number }}</strong> — {{ alt.retailer_name }}
                 {% if not alt.is_same_retailer %}
-                <span style="font-size: 0.7rem; color: #b91c1c; background: #fee2e2; border: 1px solid #fecaca; padding: 0.1rem 0.4rem; border-radius: 0.25rem; font-weight: bold; margin-left: 0.25rem;">different retailer</span>
+                <span style="font-size: 0.7rem; color: #b91c1c; background: #fee2e2; border: 1px solid #fecaca; padding: 0.1rem 0.4rem; border-radius: 4px; font-weight: bold; margin-left: 0.25rem;">
+                  different retailer
+                </span>
                 {% else %}
-                <span style="font-size: 0.7rem; color: #15803d; background: #dcfce7; border: 1px solid #bbf7d0; padding: 0.1rem 0.4rem; border-radius: 0.25rem; font-weight: bold; margin-left: 0.25rem;">same retailer</span>
+                <span style="font-size: 0.7rem; color: #15803d; background: #dcfce7; border: 1px solid #bbf7d0; padding: 0.1rem 0.4rem; border-radius: 4px; font-weight: bold; margin-left: 0.25rem;">
+                  same retailer
+                </span>
                 {% endif %}
                 ({{ alt.amount_etb }}, Due: {{ alt.due_date }})
               </li>
               {% endfor %}
             </ul>
-          </div>
+          </details>
           {% endif %}
         </div>
 
         <!-- Right: Action Controls (Owner Only) -->
-        <div style="min-width: 220px; display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-end;">
+        <div style="min-width: 220px; width: 100%; max-width: 260px; display: flex; flex-direction: column; gap: 0.5rem; align-items: stretch;">
           {% if user_role == 'owner' %}
             {% if item.evidence_level in ['L1', 'L2', 'L3'] %}
               <form method="POST" action="/matches/{{ item.match_id }}/approve" style="width: 100%;">
@@ -112,10 +165,12 @@
                   hx-post="/matches/{{ item.match_id }}/approve"
                   hx-target="#match-card-{{ item.match_id }}"
                   hx-swap="outerHTML"
-                  class="btn btn-warning"
+                  class="btn btn-warning-outline"
                   data-testid="confirm-differing-button"
+                  onclick='return confirm("Confirm and keep {{ item.unallocated_credit_etb }} as credit?\n\n• Retailer: {{ item.retailer_name }}\n• Invoice: {{ item.target_invoice_numbers }}\n• Raw Reference: {{ item.raw_reference or "None" }}\n\nRemaining amount will be kept on file as credit and not applied to other invoices.");'
                   style="width: 100%; font-weight: 800;">
-                  ⚠️ Confirm Differing Match ({{ item.diff_etb }})
+                  <svg class="icon" viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+                  Confirm Differing Match ({{ item.diff_etb }})
                 </button>
                 {% else %}
                 <input type="hidden" name="confirm_differing" value="false">
@@ -127,7 +182,8 @@
                   class="btn btn-success"
                   data-testid="confirm-match-button"
                   style="width: 100%;">
-                  ✓ Confirm Match
+                  <svg class="icon" viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+                  {% if lang == 'am' %}ክፍያ አረጋግጥ <!-- needs native review -->{% else %}Confirm Match{% endif %}
                 </button>
                 {% endif %}
               </form>
@@ -139,11 +195,12 @@
                   hx-post="/matches/{{ item.match_id or item.payment_id }}/mark-unverified"
                   hx-target="#match-card-{{ item.match_id or item.payment_id }}"
                   hx-swap="outerHTML"
-                  class="btn btn-primary"
+                  class="btn btn-unverified-outline"
                   data-testid="mark-unverified-button"
                   style="width: 100%;"
                   title="Owner override: Marks as accepted unverified. Never counted as paid in totals.">
-                  Accept Unverified (L4)
+                  <svg class="icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-1 16H6c-.55 0-1-.45-1-1V6c0-.55.45-1 1-1h12c.55 0 1 .45 1 1v12c0 .55-.45 1-1 1zm-4.44-6.19l-2.35 3.02-1.56-1.88c-.2-.25-.58-.24-.78.01l-1.74 2.23c-.26.33-.02.81.39.81h8.98c.41 0 .65-.47.39-.8l-2.55-3.39c-.19-.26-.58-.26-.78 0z"/></svg>
+                  {% if lang == 'am' %}ያልተረጋገጠ ብሎ መዝግብ <!-- needs native review -->{% else %}Accept Unverified (Not Counted as Paid){% endif %}
                 </button>
               </form>
             {% endif %}
@@ -157,12 +214,14 @@
                 hx-swap="outerHTML"
                 class="btn btn-secondary"
                 data-testid="reject-match-button"
+                onclick="return confirm('Reject this suggested match? The payment line will remain in audit records.');"
                 style="width: 100%;">
-                ✕ Reject Match
+                <svg class="icon" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/></svg>
+                {% if lang == 'am' %}አትቀበል <!-- needs native review -->{% else %}Reject Match{% endif %}
               </button>
             </form>
           {% else %}
-            <div style="font-size: 0.75rem; color: var(--text-muted); background: #f1f5f9; padding: 0.5rem; border-radius: 0.375rem; text-align: center; width: 100%;">
+            <div style="font-size: 0.75rem; color: var(--color-text-muted); background: #f1f5f9; padding: 0.65rem; border-radius: var(--radius-md); text-align: center; width: 100%;">
               🔒 Owner review required
             </div>
           {% endif %}
@@ -171,10 +230,22 @@
       </div>
     </div>
     {% else %}
-    <div style="padding: 2.5rem; text-align: center; color: var(--text-muted);">
-      <div style="font-size: 2rem; margin-bottom: 0.5rem;">🎉</div>
-      <div style="font-weight: 700; color: var(--primary);">Review queue is completely clear!</div>
-      <div style="font-size: 0.8rem;">All statement entries and credit payments have been verified.</div>
+    <div style="padding: 2.5rem; text-align: center; color: var(--color-text-muted);">
+      <svg class="icon" viewBox="0 0 24 24" style="width: 40px; height: 40px; color: var(--color-success); margin-bottom: 0.5rem;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+      <div style="font-weight: 700; color: var(--color-text-main); font-size: 1rem;">
+        {% if lang == 'am' %}
+        ምንም የሚገመገም ክፍያ የለም! <!-- needs native review -->
+        {% else %}
+        Review queue is completely clear!
+        {% endif %}
+      </div>
+      <div style="font-size: 0.8125rem; margin-top: 0.25rem;">
+        {% if lang == 'am' %}
+        ሁሉም የገቡ ክፍያዎች ተዛምደዋል ወይም ተረጋግጠዋል። <!-- needs native review -->
+        {% else %}
+        All statement entries and credit payments have been reconciled.
+        {% endif %}
+      </div>
     </div>
     {% endfor %}
   </div>

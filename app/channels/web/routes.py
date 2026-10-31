@@ -194,11 +194,21 @@ def login_page(request: Request, session: Session = Depends(get_session)):
         except Exception:
             pass
 
+    lang = request.cookies.get("lang", "en")
     return templates.TemplateResponse(
         request=request,
         name="login.html",
-        context={"error": None},
+        context={"error": None, "lang": lang},
     )
+
+
+@router.get("/set-lang/{lang_code}")
+def set_language_endpoint(lang_code: str, request: Request):
+    code = "am" if lang_code.lower() == "am" else "en"
+    referer = request.headers.get("referer", "/dashboard")
+    response = RedirectResponse(url=referer, status_code=303)
+    response.set_cookie("lang", code, max_age=365*24*3600, path="/", samesite="lax")
+    return response
 
 
 # Global dummy Argon2id hash for constant-time verification parity on unknown/locked accounts (SEC-12)
@@ -218,6 +228,7 @@ def login_submit(
     Sets HttpOnly session cookie on success.
     """
     client_ip = _get_client_ip(request)
+    lang = request.cookies.get("lang", "en")
 
     # 1. IP-level persistent rate limiting (10 attempts / minute, 5m lockout)
     try:
@@ -233,7 +244,7 @@ def login_submit(
         return templates.TemplateResponse(
             request=request,
             name="login.html",
-            context={"error": str(exc)},
+            context={"error": str(exc), "lang": lang},
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         )
 
@@ -279,7 +290,7 @@ def login_submit(
         return templates.TemplateResponse(
             request=request,
             name="login.html",
-            context={"error": "Invalid identifier or password."},
+            context={"error": "Invalid identifier or password.", "lang": lang},
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
@@ -300,7 +311,7 @@ def login_submit(
         return templates.TemplateResponse(
             request=request,
             name="login.html",
-            context={"error": "Invalid identifier or password."},
+            context={"error": "Invalid identifier or password.", "lang": lang},
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
@@ -313,7 +324,7 @@ def login_submit(
         return templates.TemplateResponse(
             request=request,
             name="login.html",
-            context={"error": "Invalid identifier or password."},
+            context={"error": "Invalid identifier or password.", "lang": lang},
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
@@ -741,6 +752,49 @@ def dashboard(
         })
 
     csrf_token = generate_csrf_token(session_rec.id, settings.secret_key)
+    lang = request.cookies.get("lang", "en")
+
+    # Daily checklist counts
+    today_sales_count = session.execute(
+        select(func.count(Invoice.id)).where(
+            Invoice.tenant_id == tenant.id,
+            Invoice.issued_date == today,
+        )
+    ).scalar_one()
+
+    today_batches_count = session.execute(
+        select(func.count(ImportBatch.id)).where(
+            ImportBatch.tenant_id == tenant.id,
+            func.date(ImportBatch.imported_at) == today,
+        )
+    ).scalar_one()
+
+    all_tasks_complete = (today_sales_count > 0 and today_batches_count > 0 and len(proposed_items) == 0)
+
+    # Recently confirmed matches with Reverse
+    recent_confirmed_rows = session.execute(
+        select(PaymentMatch, PaymentLine, Invoice, Retailer)
+        .join(PaymentLine, PaymentMatch.payment_line_id == PaymentLine.id)
+        .join(Invoice, PaymentMatch.invoice_id == Invoice.id)
+        .join(Retailer, Invoice.retailer_id == Retailer.id)
+        .where(
+            PaymentMatch.tenant_id == tenant.id,
+            PaymentMatch.state == MatchState.CONFIRMED.value,
+        )
+        .order_by(PaymentMatch.created_at.desc())
+        .limit(5)
+    ).all()
+
+    recently_confirmed = [
+        {
+            "match_id": str(pm.id),
+            "retailer_name": ret.name,
+            "invoice_number": inv.invoice_number,
+            "matched_etb": format_money(pm.matched_santim),
+            "confirmed_at": pm.created_at.strftime("%d/%m/%Y %H:%M"),
+        }
+        for pm, pl, inv, ret in recent_confirmed_rows
+    ]
 
     return templates.TemplateResponse(
         request=request,
@@ -757,6 +811,11 @@ def dashboard(
             "message": msg,
             "csrf_token": csrf_token,
             "is_demo": getattr(tenant, "is_demo", False),
+            "lang": lang,
+            "today_sales_count": today_sales_count,
+            "today_batches_count": today_batches_count,
+            "all_tasks_complete": all_tasks_complete,
+            "recently_confirmed": recently_confirmed,
         },
     )
 
@@ -1667,6 +1726,7 @@ def view_balance_confirmation(
     total_santim = sum(inv.amount_santim for inv in invoices)
     today = datetime.now(timezone.utc).date()
 
+    lang = request.cookies.get("lang", "en")
     return templates.TemplateResponse(
         request=request,
         name="confirm_balance.html",
@@ -1676,7 +1736,9 @@ def view_balance_confirmation(
             "invoices": invoices,
             "total_outstanding_etb": to_etb(total_santim),
             "as_of_date": today,
+            "expires_at": token_rec.expires_at,
             "raw_token": raw_token,
+            "lang": lang,
         },
     )
 

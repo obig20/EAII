@@ -1,83 +1,116 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ lang or 'en' }}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Balance Confirmation — {{ retailer.name }} | Daily Close</title>
+  <title>
+    {% if lang == 'am' %}የሂሳብ ማረጋገጫ — {{ retailer.name }}{% else %}Balance Confirmation — {{ retailer.name }}{% endif %}
+  </title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body class="bg-slate-100 text-slate-800 antialiased min-h-screen py-8 px-4 sm:px-6">
+<body class="{% if lang == 'am' %}amharic-text{% endif %}" style="background-color: var(--color-bg); padding: 1.5rem 1rem;">
 
-  <div class="max-w-2xl mx-auto space-y-6">
+  <div style="max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem;">
 
-    <!-- Header card -->
-    <div class="bg-slate-900 text-white p-6 rounded-2xl shadow-lg border border-slate-800">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
+    <!-- Header Card -->
+    <div style="background-color: var(--color-header-bg); color: #ffffff; padding: 1.25rem 1.5rem; border-radius: var(--radius-lg); box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 0.75rem; margin-bottom: 0.75rem;">
         <div>
-          <span class="text-xs font-bold uppercase tracking-wider text-amber-400">DAILY CLOSE · RETAILER PORTAL</span>
-          <h1 class="text-xl font-black mt-1">Balance Confirmation Statement</h1>
+          <span style="font-size: 0.75rem; font-weight: 800; color: #fbbf24; text-transform: uppercase;">
+            DAILY CLOSE · {% if lang == 'am' %}የደንበኛ ማረጋገጫ መድረክ{% else %}CUSTOMER PORTAL{% endif %}
+          </span>
+          <h1 style="font-size: 1.15rem; font-weight: 900; margin-top: 0.2rem;">
+            {% if lang == 'am' %}የቀሪ ሂሳብ ማረጋገጫ መግለጫ <!-- needs native review -->{% else %}Balance Confirmation Statement{% endif %}
+          </h1>
         </div>
-        <div class="text-right">
-          <span class="text-xs text-slate-400 block">ዕለታዊ ሂሳብ ማረጋገጫ</span>
-          <span class="text-xs font-medium text-emerald-400">● Secure Signed Link</span>
+        <div>
+          {% if lang == 'am' %}
+          <a href="/set-lang/en" class="lang-toggle" style="background: #1e293b; color: #ffffff;">English</a>
+          {% else %}
+          <a href="/set-lang/am" class="lang-toggle" style="background: #1e293b; color: #ffffff;">አማርኛ</a>
+          {% endif %}
         </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-4 text-sm">
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; font-size: 0.8125rem;">
         <div>
-          <span class="text-slate-400 text-xs block">Wholesaler / Distributor</span>
-          <span class="font-bold text-white text-base">{{ tenant.name }}</span>
+          <span style="color: #94a3b8; font-size: 0.75rem; display: block;">
+            {% if lang == 'am' %}አከፋፋይ / ጅምላ ሻጭ{% else %}Wholesaler / Distributor{% endif %}
+          </span>
+          <strong style="color: #ffffff; font-size: 0.9375rem;">{{ tenant.name }}</strong>
         </div>
-        <div class="text-right">
-          <span class="text-slate-400 text-xs block">Retailer Account</span>
-          <span class="font-bold text-white text-base">{{ retailer.name }}</span>
-          <span class="text-xs text-slate-400 block">{{ retailer.phone or 'No phone listed' }}</span>
+        <div style="text-align: right;">
+          <span style="color: #94a3b8; font-size: 0.75rem; display: block;">
+            {% if lang == 'am' %}የደንበኛ መለያ{% else %}Retailer Account{% endif %}
+          </span>
+          <strong style="color: #ffffff; font-size: 0.9375rem;">{{ retailer.name }}</strong>
+          <span style="font-size: 0.75rem; color: #94a3b8; display: block;">{{ retailer.phone or 'No phone listed' }}</span>
         </div>
       </div>
     </div>
 
-    <!-- Outstanding Balance summary card -->
-    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-      <div>
-        <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Total Outstanding Balance</span>
-        <div class="text-3xl font-black text-slate-900 mt-1">{{ total_outstanding_etb }}</div>
-        <span class="text-xs text-slate-500">As of {{ as_of_date.strftime('%d %B %Y') }} · {{ invoices|length }} open invoice(s)</span>
+    <!-- Security & Fraud Protection Warning Notice -->
+    <div style="padding: 0.75rem 1rem; border-radius: var(--radius-md); background: #f0fdf4; border: 1px solid #86efac; color: #166534; font-size: 0.8125rem; font-weight: 600;">
+      🛡️ <strong>Safety Notice:</strong> Daily Close will never ask for money or passwords. Confirming this balance does not record any payment.
+      {% if expires_at %}
+      <div style="font-size: 0.75rem; color: #14532d; margin-top: 0.25rem;">
+        Link expires: <strong>{{ expires_at.strftime('%d/%m/%Y %H:%M') }}</strong> (UTC)
       </div>
-      <div class="text-right">
-        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900">
-          Awaiting Your Review
-        </span>
+      {% endif %}
+    </div>
+
+    <!-- Total Balance Card -->
+    <div class="card" style="margin-bottom: 0;">
+      <div class="card-body" style="display: flex; justify-content: space-between; align-items: center; padding: 1.25rem;">
+        <div>
+          <span style="font-size: 0.75rem; font-weight: 700; color: var(--color-text-muted); text-transform: uppercase;">
+            {% if lang == 'am' %}አጠቃላይ ያልተከፈለ ቀሪ ሂሳብ <!-- needs native review -->{% else %}Total Outstanding Balance{% endif %}
+          </span>
+          <div style="font-size: 1.5rem; font-weight: 900; color: var(--color-text-main); margin-top: 0.25rem;">
+            {{ total_outstanding_etb }}
+          </div>
+          <span style="font-size: 0.75rem; color: var(--color-text-muted);">
+            As of {{ as_of_date.strftime('%d/%m/%Y') }} · {{ invoices|length }} open invoice(s)
+          </span>
+        </div>
+        <div>
+          <span class="badge badge-warning">
+            Awaiting Review
+          </span>
+        </div>
       </div>
     </div>
 
-    <!-- Open Invoices Table -->
-    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-      <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 font-bold text-slate-800 text-sm">
-        Open Invoice Breakdown
+    <!-- Open Invoices Breakdown -->
+    <div class="card" style="margin-bottom: 0;">
+      <div class="card-header">
+        <h2 class="card-title" style="font-size: 0.9375rem;">
+          {% if lang == 'am' %}የክፍት ደረሰኞች ዝርዝር <!-- needs native review -->{% else %}Open Invoice Breakdown{% endif %}
+        </h2>
       </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-left text-sm">
-          <thead class="bg-slate-100 text-slate-600 uppercase text-xs">
+      <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
+          <thead style="background: #f8fafc; color: var(--color-text-muted); font-size: 0.75rem; text-transform: uppercase;">
             <tr>
-              <th class="px-6 py-3">Invoice #</th>
-              <th class="px-4 py-3">Issue Date</th>
-              <th class="px-4 py-3">Due Date</th>
-              <th class="px-6 py-3 text-right">Amount (ETB)</th>
+              <th style="padding: 0.65rem 1rem;">Invoice #</th>
+              <th style="padding: 0.65rem 0.75rem;">Issue Date</th>
+              <th style="padding: 0.65rem 0.75rem;">Due Date</th>
+              <th style="padding: 0.65rem 1rem; text-align: right;">Amount (ETB)</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-slate-100">
+          <tbody>
             {% for inv in invoices %}
-            <tr>
-              <td class="px-6 py-3 font-bold text-slate-900">{{ inv.invoice_number }}</td>
-              <td class="px-4 py-3 text-slate-600">{{ inv.issued_date.strftime('%d %b %Y') }}</td>
-              <td class="px-4 py-3 text-slate-600">{{ inv.due_date.strftime('%d %b %Y') }}</td>
-              <td class="px-6 py-3 text-right font-extrabold text-slate-900">
-                {{ inv.amount_santim // 100 }}.{{ '%02d'|format(inv.amount_santim % 100) }} ETB
+            <tr style="border-bottom: 1px solid var(--color-border-subtle);">
+              <td style="padding: 0.65rem 1rem; font-weight: 700;">{{ inv.invoice_number }}</td>
+              <td style="padding: 0.65rem 0.75rem; color: var(--color-text-muted);">{{ inv.issued_date.strftime('%d/%m/%Y') }}</td>
+              <td style="padding: 0.65rem 0.75rem; color: var(--color-text-muted); font-weight: 600;">{{ inv.due_date.strftime('%d/%m/%Y') }}</td>
+              <td style="padding: 0.65rem 1rem; text-align: right; font-weight: 800;">
+                {{ (inv.amount_santim // 100) | format_money(False) }} ETB
               </td>
             </tr>
             {% else %}
             <tr>
-              <td colspan="4" class="px-6 py-6 text-center text-slate-400">No open invoices found.</td>
+              <td colspan="4" style="padding: 1.5rem; text-align: center; color: var(--color-text-muted);">No open invoices found.</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -85,59 +118,58 @@
       </div>
     </div>
 
-    <!-- Action Choice: Confirm or Dispute -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-
-      <!-- OPTION 1: CONFIRM -->
-      <div class="bg-white p-6 rounded-2xl border-2 border-emerald-500 shadow-sm flex flex-col justify-between">
-        <div>
-          <div class="flex items-center space-x-2 text-emerald-800 mb-2">
-            <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            <h2 class="font-bold text-lg">Option 1: Confirm Balance</h2>
+    <!-- Actions: Confirm vs Dispute -->
+    <div style="display: grid; grid-template-columns: 1fr; gap: 1rem;">
+      
+      <!-- Option 1: Confirm -->
+      <div class="card" style="border: 2px solid var(--color-success); margin-bottom: 0;">
+        <div class="card-body">
+          <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--color-success); font-weight: 800; font-size: 1rem; margin-bottom: 0.5rem;">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+            <span>Option 1: Confirm Balance</span>
           </div>
-          <p class="text-xs text-slate-600 mb-4">
-            If this statement accurately matches your accounts, click confirm.
+          <p style="font-size: 0.8125rem; color: var(--color-text-muted); margin-bottom: 1rem;">
+            If this statement matches your records, tap confirm below.
           </p>
 
-          <form action="/confirm-balance/{{ raw_token }}/confirm" method="POST" class="space-y-4">
-            <!-- Optional explicit payment details (L3 Evidence) -->
-            <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
-              <span class="font-bold text-slate-700 block">Did you already pay all or part of this? (Optional)</span>
-              <p class="text-slate-500">Providing payment details records verified evidence for your distributor:</p>
-              <div>
-                <input type="text" name="payment_ref" placeholder="Payment Reference / Txn ID (e.g. FT12345678)"
-                  class="w-full px-2.5 py-1.5 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-emerald-500">
-              </div>
-              <div class="grid grid-cols-2 gap-2">
-                <input type="text" name="payment_amount_etb" placeholder="Amount Paid (ETB)"
-                  class="w-full px-2.5 py-1.5 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-emerald-500">
-                <input type="date" name="payment_date"
-                  class="w-full px-2.5 py-1.5 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-emerald-500">
+          <form action="/confirm-balance/{{ raw_token }}/confirm" method="POST">
+            <!-- Optional payment details -->
+            <div style="background: #f8fafc; border: 1px solid var(--color-border-subtle); border-radius: var(--radius-sm); padding: 0.75rem; margin-bottom: 1rem; font-size: 0.8125rem;">
+              <span style="font-weight: 700; display: block; margin-bottom: 0.25rem;">Did you already make a payment for this? (Optional)</span>
+              <p style="font-size: 0.75rem; color: var(--color-text-muted); margin-bottom: 0.5rem;">
+                Providing transaction reference helps your wholesaler match it immediately:
+              </p>
+              <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                <input type="text" name="payment_ref" placeholder="Payment Reference / Txn ID (e.g. FT12345678)" class="form-input" style="min-height: 40px; font-size: 0.8125rem;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                  <input type="text" name="payment_amount_etb" placeholder="Amount Paid (ETB)" class="form-input" style="min-height: 40px; font-size: 0.8125rem;">
+                  <input type="date" name="payment_date" class="form-input" style="min-height: 40px; font-size: 0.8125rem;">
+                </div>
               </div>
             </div>
 
-            <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm py-3 rounded-xl shadow transition">
+            <button type="submit" class="btn btn-success" style="width: 100%;">
               ✓ Confirm Balance (ትክክል ነው አረጋግጥ)
             </button>
           </form>
         </div>
       </div>
 
-      <!-- OPTION 2: DISPUTE -->
-      <div class="bg-white p-6 rounded-2xl border-2 border-red-400 shadow-sm flex flex-col justify-between">
-        <div>
-          <div class="flex items-center space-x-2 text-red-800 mb-2">
-            <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            <h2 class="font-bold text-lg">Option 2: Dispute Balance</h2>
+      <!-- Option 2: Dispute -->
+      <div class="card" style="border: 2px solid var(--color-danger); margin-bottom: 0;">
+        <div class="card-body">
+          <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--color-danger); font-weight: 800; font-size: 1rem; margin-bottom: 0.5rem;">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+            <span>Option 2: Dispute Balance</span>
           </div>
-          <p class="text-xs text-slate-600 mb-4">
-            If any invoice or amount is incorrect, submit a dispute with a reason code.
+          <p style="font-size: 0.8125rem; color: var(--color-text-muted); margin-bottom: 1rem;">
+            If any invoice is unrecognized or amount differs, file a dispute notice.
           </p>
 
-          <form action="/confirm-balance/{{ raw_token }}/dispute" method="POST" class="space-y-3">
+          <form action="/confirm-balance/{{ raw_token }}/dispute" method="POST" style="display: flex; flex-direction: column; gap: 0.75rem;">
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">Reason Code *</label>
-              <select name="reason_code" required class="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-red-500">
+              <label class="form-label">Reason *</label>
+              <select name="reason_code" required class="form-select">
                 <option value="ALREADY_PAID">Already Paid (ክፍያ ተፈጽሟል)</option>
                 <option value="WRONG_AMOUNT">Incorrect Amount (የተሳሳተ መጠን)</option>
                 <option value="GOODS_RETURNED">Goods Returned / Not Received (እቃ ተመልሷል)</option>
@@ -147,12 +179,11 @@
             </div>
 
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">Explanation *</label>
-              <textarea name="explanation" required rows="3" placeholder="Please provide specific details..."
-                class="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-red-500"></textarea>
+              <label class="form-label">Explanation *</label>
+              <textarea name="explanation" required rows="2" placeholder="Explain the difference..." class="form-input" style="min-height: 70px; resize: vertical;"></textarea>
             </div>
 
-            <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-black text-sm py-3 rounded-xl shadow transition">
+            <button type="submit" class="btn btn-danger" style="width: 100%;">
               ✕ Dispute Statement (ተቃውሞ አስገባ)
             </button>
           </form>
@@ -162,8 +193,8 @@
     </div>
 
     <!-- Footer info -->
-    <div class="text-center text-xs text-slate-500 pt-4">
-      Daily Close &copy; 2026 Birana Technology, Addis Ababa. This is a secure one-time verification link.
+    <div style="text-align: center; font-size: 0.75rem; color: var(--color-text-muted); padding: 1rem 0;">
+      Daily Close &copy; 2026 Birana Technology, Addis Ababa. Secure signed balance verification.
     </div>
 
   </div>

@@ -1,76 +1,163 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ lang or 'en' }}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Daily Close — Birana Technology{% endblock %}</title>
-  <!-- Local CSS and Scripts (No external CDN/fonts/scripts) -->
+  <!-- Local CSS and HTMX (No CDN, external fonts, scripts or analytics) -->
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/htmx.min.js"></script>
-  <style>
-    .htmx-indicator { display: none; }
-    .htmx-request .htmx-indicator { display: inline-block; }
-  </style>
 </head>
-<body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col font-sans" hx-headers='{"x-csrf-token": "{{ csrf_token }}"}'>
+<body class="{% if lang == 'am' %}amharic-text{% endif %}" hx-headers='{"x-csrf-token": "{{ csrf_token }}"}'>
+
   {% if is_demo %}
   <!-- Demo Mode Banner -->
-  <div style="background-color: #f59e0b; color: #0f172a; padding: 0.6rem 1.5rem; font-size: 0.8rem; font-weight: 800; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #d97706;">
-    <div style="display: flex; align-items: center; gap: 0.5rem;">
-      <span style="background: #0f172a; color: #f59e0b; padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;">Demo Mode</span>
-      <span>Addis Ababa Wholesale Demonstration — Data resets daily.</span>
+  <div class="demo-banner">
+    <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+      <span style="background: #0f172a; color: #fbbf24; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 800; text-transform: uppercase;">
+        {% if lang == 'am' %}የማሳያ ሁኔታ{% else %}Demo Mode{% endif %}
+      </span>
+      <span>
+        {% if lang == 'am' %}የአዲስ አበባ ጅምላ ንግድ ማሳያ — መረጃው በየቀኑ ይታደሳል።{% else %}Addis Ababa Wholesale Demonstration — Data resets daily.{% endif %}
+      </span>
     </div>
     <form action="/demo/reset" method="POST" style="margin: 0;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button type="submit" style="background-color: #0f172a; color: #fbbf24; border: 1px solid #1e293b; padding: 0.35rem 0.85rem; border-radius: 0.375rem; font-weight: 800; font-size: 0.75rem; cursor: pointer;">
-        ↺ Reset Demo Data
+      <button type="submit" style="background: #0f172a; color: #fbbf24; border: 1px solid #1e293b; padding: 0.35rem 0.75rem; border-radius: 6px; font-weight: 800; font-size: 0.75rem; cursor: pointer; display: inline-flex; align-items: center; gap: 0.35rem;">
+        <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+        {% if lang == 'am' %}መረጃ አድስ{% else %}Reset Demo Data{% endif %}
       </button>
     </form>
   </div>
   {% endif %}
 
-  <!-- Top Navigation Header -->
-  <header class="bg-slate-900 text-white shadow-md">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <span class="text-2xl font-black tracking-tight text-amber-400">DAILY CLOSE</span>
-        <span class="text-xs font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 uppercase tracking-wider">Ethiopia (ETB)</span>
-        <span class="text-xs text-slate-400">| ዕለታዊ ሂሳብ ማጠቃለያ</span>
-      </div>
-      <div class="flex items-center space-x-4 text-sm">
-        {% if user_role %}
-        <span class="text-slate-300">Tenant: <strong class="text-white">{{ tenant_name }}</strong></span>
-        <span class="px-2.5 py-1 rounded-full text-xs font-medium {% if user_role == 'owner' %}bg-amber-500/20 text-amber-300 border border-amber-500/30{% else %}bg-blue-500/20 text-blue-300 border border-blue-500/30{% endif %}">
-          Role: {{ user_role|capitalize }}
+  <!-- Top App Header -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="brand-wrapper">
+        <a href="/dashboard" style="text-decoration: none;">
+          <span class="brand-title">DAILY CLOSE</span>
+        </a>
+        <span class="brand-subtitle">
+          {% if lang == 'am' %}ዕለታዊ ሂሳብ ማጠቃለያ · ኢትዮጵያ (ETB){% else %}Ethiopia (ETB) · ዕለታዊ ሂሳብ ማጠቃለያ{% endif %}
         </span>
-        {% if user_role == 'owner' %}
-        <a href="/settings/users" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded transition">Users</a>
+      </div>
+
+      <div class="header-nav">
+        <!-- Language Switcher -->
+        {% if lang == 'am' %}
+        <a href="/set-lang/en" class="lang-toggle" title="Switch to English">
+          English
+        </a>
+        {% else %}
+        <a href="/set-lang/am" class="lang-toggle" title="ወደ አማርኛ ቀይር">
+          አማርኛ
+        </a>
         {% endif %}
-        <a href="/brief" target="_blank" class="text-xs bg-slate-800 hover:bg-slate-700 text-amber-300 px-3 py-1.5 rounded transition">Morning Brief</a>
-        <form method="POST" action="/logout" class="inline">
+
+        {% if user_role %}
+        <span style="font-size: 0.8125rem; color: #cbd5e1;">
+          <strong style="color: #ffffff;">{{ tenant_name }}</strong>
+        </span>
+        
+        <span class="badge {% if user_role == 'owner' %}badge-warning{% else %}badge-info{% endif %}">
+          {% if user_role == 'owner' %}
+            {% if lang == 'am' %}ባለቤት{% else %}Owner{% endif %}
+          {% else %}
+            {% if lang == 'am' %}ካሸር{% else %}Cashier{% endif %}
+          {% endif %}
+        </span>
+
+        {% if user_role == 'owner' %}
+        <a href="/settings/users" class="lang-toggle" style="background: #1e293b; color: #e2e8f0;">
+          {% if lang == 'am' %}ተጠቃሚዎች{% else %}Users{% endif %}
+        </a>
+        {% endif %}
+
+        <a href="/brief" target="_blank" class="lang-toggle" style="background: #1e293b; color: #fbbf24;">
+          {% if lang == 'am' %}የጧት ማጠቃለያ{% else %}Morning Brief{% endif %}
+        </a>
+
+        <form method="POST" action="/logout" style="margin: 0; display: inline;">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button type="submit" class="text-xs text-rose-300 hover:text-rose-100 bg-rose-950/40 border border-rose-800/40 px-2.5 py-1 rounded transition">Log out</button>
+          <button type="submit" class="lang-toggle" style="background: #450a0a; color: #fca5a5; border-color: #7f1d1d; cursor: pointer;">
+            {% if lang == 'am' %}ውጣ{% else %}Log out{% endif %}
+          </button>
         </form>
         {% endif %}
       </div>
     </div>
   </header>
 
-  <!-- Main Container -->
-  <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+  <!-- Main Content Body -->
+  <main class="app-main">
     {% block content %}{% endblock %}
   </main>
 
-  <!-- Footer -->
-  <footer class="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500">
-    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-2">
+  <!-- Toast Container (Aria-Live Polite, Dismissible, ≥ 10s Visible) -->
+  <div id="toast-container" aria-live="polite"></div>
+
+  <!-- App Footer -->
+  <footer style="background-color: #ffffff; border-top: 1px solid var(--color-border-subtle); padding: 1rem; text-align: center; font-size: 0.75rem; color: var(--color-text-muted); margin-top: auto;">
+    <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.75rem;">
       <div>Daily Close &copy; 2026 Birana Technology, Addis Ababa.</div>
-      <div class="flex space-x-4">
-        <a href="/exports/sales.csv" class="hover:text-slate-800 underline">Export Sales (CSV)</a>
-        <a href="/exports/payments.csv" class="hover:text-slate-800 underline">Export Payments (CSV)</a>
-        <a href="/exports/accountant.csv" class="hover:text-slate-800 font-semibold text-indigo-600 underline">Accountant Export</a>
+      <div style="display: flex; gap: 1rem;">
+        <a href="/exports/sales.csv" style="color: var(--color-text-muted); text-decoration: underline;">Export Sales (CSV)</a>
+        <a href="/exports/payments.csv" style="color: var(--color-text-muted); text-decoration: underline;">Export Payments (CSV)</a>
+        <a href="/exports/accountant.csv" style="color: var(--color-primary); font-weight: 700; text-decoration: underline;">Accountant Export</a>
       </div>
     </div>
   </footer>
+
+  <!-- Local Utilities Script -->
+  <script>
+    // Toast Notification Utility (≥ 10s visibility, aria-live, dismissible)
+    function showToast(message, type = 'success', undoCallback = null) {
+      const container = document.getElementById('toast-container');
+      if (!container) return;
+      
+      const toast = document.createElement('div');
+      toast.className = `toast ${type === 'danger' ? 'toast-danger' : 'toast-success'}`;
+      toast.setAttribute('role', 'status');
+      
+      let html = `<span>${message}</span>`;
+      if (undoCallback) {
+        html += `<button type="button" class="toast-undo-btn">Undo</button>`;
+      }
+      html += `<button type="button" class="toast-close-btn" aria-label="Dismiss">&times;</button>`;
+      toast.innerHTML = html;
+      
+      const closeBtn = toast.querySelector('.toast-close-btn');
+      closeBtn.addEventListener('click', () => toast.remove());
+      
+      if (undoCallback) {
+        const undoBtn = toast.querySelector('.toast-undo-btn');
+        undoBtn.addEventListener('click', () => {
+          undoCallback();
+          toast.remove();
+        });
+      }
+      
+      container.appendChild(toast);
+      // Visible for at least 10 seconds before auto-dismiss
+      setTimeout(() => {
+        if (toast.parentNode) toast.remove();
+      }, 10000);
+    }
+
+    // Password Toggle Helper
+    function togglePasswordVisibility(inputId, toggleBtnId) {
+      const input = document.getElementById(inputId);
+      const btn = document.getElementById(toggleBtnId);
+      if (!input || !btn) return;
+      if (input.type === 'password') {
+        input.type = 'text';
+        btn.textContent = 'Hide';
+      } else {
+        input.type = 'password';
+        btn.textContent = 'Show';
+      }
+    }
+  </script>
 </body>
 </html>

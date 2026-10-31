@@ -1,174 +1,316 @@
 {% extends "base.html" %}
 
-{% block content %}
-<div class="space-y-6">
+{% block title %}
+  {% if lang == 'am' %}ዳሽቦርድ — ዕለታዊ ሂሳብ ማጠቃለያ{% else %}Dashboard — Daily Close{% endif %}
+{% endblock %}
 
-  <!-- Alert Banner if gaps or messages -->
+{% block content %}
+<div style="display: flex; flex-direction: column; gap: 1.25rem;">
+
+  <!-- Alert Banner if gaps or flash messages -->
   {% if message %}
-  <div class="p-4 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-sm flex items-center justify-between">
+  <div style="padding: 0.85rem 1.15rem; border-radius: var(--radius-md); background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a; font-size: 0.875rem; font-weight: 600; display: flex; align-items: center; justify-content: space-between;">
     <div>{{ message }}</div>
   </div>
   {% endif %}
 
-  <!-- KPI Cards Row -->
-  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-    <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-      <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Total Receivables</span>
-      <div class="text-2xl font-black text-slate-900 mt-1">{{ aging_report.grand_total_outstanding_etb }}</div>
-      <div class="text-xs text-slate-400 mt-1">{{ aging_report.retailers|length }} active debtor accounts</div>
+  <!-- TOP SUMMARY: 3 NUMBERS (No Decimals on Mobile) -->
+  <div class="kpi-row">
+    <div class="kpi-card">
+      <div class="kpi-label">
+        {% if lang == 'am' %}ያልተከፈለ አጠቃላይ <!-- needs native review -->{% else %}Total Unpaid{% endif %}
+      </div>
+      <div class="kpi-val">
+        {{ aging_report.grand_total_outstanding_etb }}
+      </div>
+      <div style="font-size: 0.75rem; color: var(--color-text-muted); margin-top: 0.25rem;">
+        {{ aging_report.retailers|length }} {% if lang == 'am' %}ደንበኞች{% else %}debtor accounts{% endif %}
+      </div>
     </div>
 
-    <div class="bg-white p-5 rounded-xl border border-red-200 bg-red-50/20 shadow-sm">
-      <span class="text-xs font-bold uppercase tracking-wider text-red-600">Total Overdue</span>
-      <div class="text-2xl font-black text-red-600 mt-1">{{ aging_report.grand_total_overdue_etb }}</div>
-      <div class="text-xs text-red-500 mt-1">Requires morning collection action</div>
+    <div class="kpi-card" style="border-color: var(--color-danger-border); background-color: var(--color-danger-bg);">
+      <div class="kpi-label" style="color: var(--color-danger);">
+        {% if lang == 'am' %}ቀኑ ያለፈበት <!-- needs native review -->{% else %}Overdue{% endif %}
+      </div>
+      <div class="kpi-val overdue">
+        {{ aging_report.grand_total_overdue_etb }}
+      </div>
+      <div style="font-size: 0.75rem; color: var(--color-danger); margin-top: 0.25rem;">
+        {% if aging_report.grand_total_overdue_santim > 0 %}
+          {% if lang == 'am' %}አስቸኳይ ስብስብ ያስፈልጋል{% else %}Urgent collection needed{% endif %}
+        {% else %}
+          {% if lang == 'am' %}ምንም ያለፈበት የለም{% else %}No overdue balances{% endif %}
+        {% endif %}
+      </div>
     </div>
 
-    <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-      <span class="text-xs font-bold uppercase tracking-wider text-amber-600">Review Queue</span>
-      <div id="kpi-review-queue" class="text-2xl font-black text-amber-600 mt-1">{{ proposed_items|length }}</div>
-      <div class="text-xs text-slate-400 mt-1">Proposed & unverified matches</div>
-    </div>
-
-    <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-      <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Addis Ababa Time</span>
-      <div class="text-xl font-bold text-slate-800 mt-1">{{ today_date.strftime('%A, %d %b') }}</div>
-      <div class="text-xs text-emerald-600 font-medium mt-1">● System Online (EAT UTC+3)</div>
+    <div class="kpi-card">
+      <div class="kpi-label" style="color: var(--color-primary);">
+        {% if lang == 'am' %}ያልተረጋገጡ ክፍያዎች <!-- needs native review -->{% else %}Pending Matches{% endif %}
+      </div>
+      <div id="kpi-review-queue" class="kpi-val pending">
+        {{ proposed_items|length }}
+      </div>
+      <div style="font-size: 0.75rem; color: var(--color-text-muted); margin-top: 0.25rem;">
+        {% if proposed_items %}
+          {% if lang == 'am' %}የባለቤት ማረጋገጫ ያስፈልጋል{% else %}Requires owner approval{% endif %}
+        {% else %}
+          {% if lang == 'am' %}ሁሉም ተረጋግጧል{% else %}All reconciled today{% endif %}
+        {% endif %}
+      </div>
     </div>
   </div>
 
-  <!-- DAILY CLOSE 3 STEPS -->
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-    <!-- STEP 1: Log Today's Sales -->
-    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
-      <div>
-        <div class="flex items-center space-x-2 mb-3">
-          <span class="w-7 h-7 bg-amber-500 text-slate-900 rounded-full font-black text-sm flex items-center justify-center">1</span>
-          <h2 class="font-bold text-slate-900 text-base">Log Today's Credit Sales</h2>
-        </div>
-        <p class="text-xs text-slate-500 mb-4">Record credit invoices issued today. Duplicates rejected; sequence gaps flagged.</p>
-
-        <form action="/sales" method="POST" class="space-y-3" id="sales-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1">Invoice Number *</label>
-            <input type="text" name="invoice_number" required placeholder="e.g. INV-381"
-              class="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none">
-          </div>
-
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1">Retailer *</label>
-            <select name="retailer_id" required class="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none">
-              {% for r in retailers %}
-              <option value="{{ r.id }}">{{ r.name }} ({{ r.phone or 'No phone' }})</option>
-              {% endfor %}
-            </select>
-          </div>
-
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">Amount (ETB) *</label>
-              <input type="text" name="amount_etb" required placeholder="1250.00"
-                class="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none">
-            </div>
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">Due Date *</label>
-              <input type="date" name="due_date" required value="{{ default_due_date.isoformat() }}"
-                class="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none">
-            </div>
-          </div>
-
-          <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-2.5 rounded-lg shadow transition mt-2">
-            Record Credit Sale
-          </button>
-        </form>
+  <!-- ALL THREE TASKS COMPLETE BANNER (Shown strictly when all 3 are done today) -->
+  {% if all_tasks_complete %}
+  <div style="padding: 1rem 1.25rem; border-radius: var(--radius-lg); background-color: var(--color-success-bg); border: 2px solid var(--color-success-border); color: var(--color-success); font-weight: 700; display: flex; align-items: center; gap: 0.75rem;">
+    <svg class="icon" viewBox="0 0 24 24" style="width: 24px; height: 24px; flex-shrink: 0;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+    <div>
+      <div style="font-size: 0.9375rem;">
+        {% if lang == 'am' %}
+        የዛሬው የዕለታዊ ሂሳብ ማጠቃለያ ስራዎች በሙሉ ተጠናቀዋል። <!-- needs native review -->
+        {% else %}
+        All daily close tasks are complete for today. Debtor ledgers are up to date.
+        {% endif %}
       </div>
-
-      <!-- Bulk CSV Upload for Sales -->
-      <div class="mt-4 pt-4 border-t border-slate-100">
-        <label class="block text-xs font-bold text-slate-700 mb-1">Or Bulk Import Sales CSV</label>
-        <form action="/sales/bulk" method="POST" enctype="multipart/form-data" class="flex gap-2">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="file" name="file" accept=".csv" required class="text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200">
-          <button type="submit" class="bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold px-3 py-1.5 rounded transition">Upload</button>
-        </form>
+      <div style="font-size: 0.75rem; font-weight: 500; color: #166534; margin-top: 0.2rem;">
+        {% if lang == 'am' %}
+        ሽያጭ ተመዝግቧል፣ የባንክ መግለጫ ገብቷል፣ እና ሁሉም ክፍያዎች ተዛምደዋል።
+        {% else %}
+        Sales recorded, bank statement ingested, and all payment lines reconciled.
+        {% endif %}
       </div>
     </div>
+  </div>
+  {% endif %}
 
-    <!-- STEP 2: Import Today's Statement -->
-    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
-      <div>
-        <div class="flex items-center space-x-2 mb-3">
-          <span class="w-7 h-7 bg-amber-500 text-slate-900 rounded-full font-black text-sm flex items-center justify-center">2</span>
-          <h2 class="font-bold text-slate-900 text-base">Import Today's Statement</h2>
-        </div>
-        <p class="text-xs text-slate-500 mb-4">Ingest CBE CSV, Telebirr XLSX, or Dashen CSV. Ingests payment lines as L2 evidence and triggers deterministic matching.</p>
+  <!-- TODAY'S CHECKLIST: ONE-TAP ACTION CARDS (NO FORMS IN DEFAULT VIEW) -->
+  <div class="card" style="margin-bottom: 0;">
+    <div class="card-header">
+      <h2 class="card-title" style="display: flex; align-items: center; gap: 0.5rem;">
+        <svg class="icon" viewBox="0 0 24 24" style="color: var(--color-primary);"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L10 12.17l7.59-7.59L19 6l-9 11z"/></svg>
+        {% if lang == 'am' %}የዛሬው የሂሳብ ማጠቃለያ ስራዎች <!-- needs native review -->{% else %}Today's Reconciliation Tasks{% endif %}
+      </h2>
+      <span style="font-size: 0.75rem; color: var(--color-text-muted);">
+        {{ today_date.strftime('%d/%m/%Y') }}
+      </span>
+    </div>
 
-        <form action="/statements/upload" method="POST" enctype="multipart/form-data" class="space-y-4">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="card-body" style="padding: 1rem;">
+      
+      <!-- TASK 1: Record Credit Sales -->
+      <div class="task-card {% if today_sales_count > 0 %}complete{% else %}pending{% endif %}"
+           onclick="document.getElementById('drawer-sales').style.display = document.getElementById('drawer-sales').style.display === 'none' ? 'block' : 'none';"
+           style="cursor: pointer;">
+        <div style="display: flex; align-items: center;">
+          <div class="task-number">1</div>
           <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1">Bank / Wallet Source *</label>
-            <select name="source_name" class="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none">
+            <div style="font-weight: 700; font-size: 0.9375rem;">
+              {% if lang == 'am' %}የዛሬውን የብድር ሽያጭ ይመዝግቡ <!-- needs native review -->{% else %}Record Today's Credit Sales{% endif %}
+            </div>
+            <div style="font-size: 0.75rem; color: var(--color-text-muted); margin-top: 0.15rem;">
+              {% if today_sales_count > 0 %}
+                ✓ {{ today_sales_count }} {% if lang == 'am' %}ደረሰኞች ዛሬ ተመዝግበዋል{% else %}invoice(s) recorded today{% endif %}
+              {% else %}
+                {% if lang == 'am' %}ዛሬ የተመዘገበ ሽያጭ የለም — ለመመዝገብ ይንኩ{% else %}No credit sales entered today — tap to record{% endif %}
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div style="color: var(--color-text-muted); font-size: 0.8125rem; font-weight: 700; display: flex; align-items: center; gap: 0.35rem;">
+          <span>{% if today_sales_count > 0 %}{% if lang == 'am' %}ተጨማሪ መዝግብ{% else %}Add More{% endif %}{% else %}{% if lang == 'am' %}መዝግብ{% else %}Open{% endif %}{% endif %}</span>
+          <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px;"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
+        </div>
+      </div>
+
+      <!-- Collapsible Drawer for Sales Entry -->
+      <div id="drawer-sales" style="display: none; background: #f8fafc; border: 1.5px solid var(--color-input-border); border-radius: var(--radius-md); padding: 1.25rem; margin-bottom: 1rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <h3 style="font-size: 0.9375rem; font-weight: 800;">
+            {% if lang == 'am' %}አዲስ የብድር ሽያጭ መመዝገቢያ{% else %}Record Single Credit Sale{% endif %}
+          </h3>
+          <button type="button" onclick="document.getElementById('drawer-sales').style.display = 'none';" style="background: transparent; border: none; font-size: 1.25rem; cursor: pointer; color: var(--color-text-muted);">&times;</button>
+        </div>
+
+        <form action="/sales" method="POST" id="sales-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          
+          <div style="display: grid; grid-template-columns: 1fr; gap: 0.75rem;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label">{% if lang == 'am' %}የደረሰኝ ቁጥር *{% else %}Invoice Number *{% endif %}</label>
+              <input type="text" name="invoice_number" required placeholder="e.g. INV-381" class="form-input">
+            </div>
+
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label">{% if lang == 'am' %}ደንበኛ *{% else %}Retailer *{% endif %}</label>
+              <select name="retailer_id" required class="form-select">
+                {% for r in retailers %}
+                <option value="{{ r.id }}">{{ r.name }} ({{ r.phone or 'No phone' }})</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">{% if lang == 'am' %}መጠን (ብር) *{% else %}Amount (ETB) *{% endif %}</label>
+                <input type="text" name="amount_etb" required placeholder="1250.00" class="form-input">
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">{% if lang == 'am' %}የመክፈያ ቀን *{% else %}Due Date *{% endif %}</label>
+                <input type="date" name="due_date" required value="{{ default_due_date.isoformat() }}" class="form-input">
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 0.5rem;">
+              {% if lang == 'am' %}የብድር ሽያጭ መዝግብ{% else %}Record Credit Sale{% endif %}
+            </button>
+          </div>
+        </form>
+
+        <!-- Bulk CSV Upload -->
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--color-border-subtle);">
+          <span style="font-size: 0.75rem; font-weight: 700; color: var(--color-text-muted); display: block; margin-bottom: 0.35rem;">
+            {% if lang == 'am' %}ወይም የሽያጭ CSV ፋይል ያስገቡ{% else %}Or Bulk Import Sales CSV{% endif %}
+          </span>
+          <form action="/sales/bulk" method="POST" enctype="multipart/form-data" style="display: flex; gap: 0.5rem; align-items: center;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="file" name="file" accept=".csv" required style="font-size: 0.75rem;">
+            <button type="submit" class="btn btn-secondary" style="min-height: 36px; padding: 0.35rem 0.75rem;">Upload</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- TASK 2: Upload Bank Statement -->
+      <div class="task-card {% if today_batches_count > 0 %}complete{% else %}pending{% endif %}"
+           onclick="document.getElementById('drawer-statement').style.display = document.getElementById('drawer-statement').style.display === 'none' ? 'block' : 'none';"
+           style="cursor: pointer;">
+        <div style="display: flex; align-items: center;">
+          <div class="task-number">2</div>
+          <div>
+            <div style="font-weight: 700; font-size: 0.9375rem;">
+              {% if lang == 'am' %}የባንክ ወይም የቴሌብር መግለጫ ያስገቡ <!-- needs native review -->{% else %}Import Today's Statement{% endif %}
+            </div>
+            <div style="font-size: 0.75rem; color: var(--color-text-muted); margin-top: 0.15rem;">
+              {% if today_batches_count > 0 %}
+                ✓ {{ today_batches_count }} {% if lang == 'am' %}መግለጫ(ዎች) ዛሬ ገብተዋል{% else %}statement batch(es) imported today{% endif %}
+              {% else %}
+                {% if lang == 'am' %}የCBE፣ ቴሌብር ወይም ዳሸን ፋይል ያስገቡ{% else %}Import CBE CSV, Telebirr XLSX, or Dashen CSV{% endif %}
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div style="color: var(--color-text-muted); font-size: 0.8125rem; font-weight: 700; display: flex; align-items: center; gap: 0.35rem;">
+          <span>{% if today_batches_count > 0 %}{% if lang == 'am' %}ተጨማሪ አስገባ{% else %}Upload More{% endif %}{% else %}{% if lang == 'am' %}አስገባ{% else %}Upload{% endif %}{% endif %}</span>
+          <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px;"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
+        </div>
+      </div>
+
+      <!-- Collapsible Drawer for Statement Import -->
+      <div id="drawer-statement" style="display: none; background: #f8fafc; border: 1.5px solid var(--color-input-border); border-radius: var(--radius-md); padding: 1.25rem; margin-bottom: 1rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <h3 style="font-size: 0.9375rem; font-weight: 800;">
+            {% if lang == 'am' %}የባንክ / ቴሌብር መግለጫ ማስገቢያ{% else %}Import Today's Statement{% endif %}
+          </h3>
+          <button type="button" onclick="document.getElementById('drawer-statement').style.display = 'none';" style="background: transparent; border: none; font-size: 1.25rem; cursor: pointer; color: var(--color-text-muted);">&times;</button>
+        </div>
+
+        <form action="/statements/upload" method="POST" enctype="multipart/form-data">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          
+          <div class="form-group">
+            <label class="form-label">{% if lang == 'am' %}የባንክ ምንጭ *{% else %}Bank / Wallet Source *{% endif %}</label>
+            <select name="source_name" class="form-select">
               <option value="cbe_csv">Commercial Bank of Ethiopia (CBE) · CSV</option>
               <option value="telebirr_xlsx">Telebirr Mobile Money · XLSX</option>
               <option value="dashen_csv">Dashen Bank · CSV</option>
             </select>
           </div>
 
-          <div>
-            <label class="block text-xs font-bold text-slate-700 mb-1">Statement File (.csv or .xlsx) *</label>
-            <input type="file" name="file" accept=".csv,.xlsx" required
-              class="w-full text-xs text-slate-500 file:mr-3 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-amber-100 file:text-amber-900 hover:file:bg-amber-200">
+          <div class="form-group">
+            <label class="form-label">{% if lang == 'am' %}የመግለጫ ፋይል (.csv ወይም .xlsx) *{% else %}Statement File (.csv or .xlsx) *{% endif %}</label>
+            <input type="file" name="file" accept=".csv,.xlsx" required class="form-input" style="padding: 0.45rem;">
           </div>
 
-          <button type="submit" class="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 font-extrabold text-xs py-2.5 rounded-lg shadow transition">
-            Import & Run Auto-Matcher
+          <button type="submit" class="btn btn-primary" style="width: 100%;">
+            {% if lang == 'am' %}አስገባ እና ክፍያዎችን አዛምድ{% else %}Import Today's Statement & Run Auto-Matcher{% endif %}
           </button>
         </form>
       </div>
 
-      <div class="mt-4 pt-4 border-t border-slate-100 text-xs text-slate-400">
-        Deterministic rules: Tier A (exact ref & amount), Tier B (phone & date window), Tier C (fuzzy name).
-      </div>
-    </div>
-
-    <!-- STEP 3: Review Queue Status Box -->
-    <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
-      <div>
-        <div class="flex items-center space-x-2 mb-3">
-          <span class="w-7 h-7 bg-amber-500 text-slate-900 rounded-full font-black text-sm flex items-center justify-center">3</span>
-          <h2 class="font-bold text-slate-900 text-base">Approve Proposed Matches</h2>
-        </div>
-        <p class="text-xs text-slate-500 mb-4">Confirm proposed partial, combined, or ambiguous payments to update debtor ledgers.</p>
-
-        <div class="bg-slate-50 rounded-lg p-4 border border-slate-200 text-center space-y-2">
-          <div id="step3-review-count" class="text-3xl font-black text-amber-600">{{ proposed_items|length }}</div>
-          <div class="text-xs font-bold text-slate-700">Payments Pending Review</div>
-          <div class="text-xs text-slate-400">
-            {% if proposed_items %}
-            Requires owner confirmation below.
-            {% else %}
-            All matches approved for today.
-            {% endif %}
+      <!-- TASK 3: Review Proposed Matches -->
+      <a href="#review-queue-section" class="task-card {% if proposed_items|length == 0 %}complete{% else %}pending{% endif %}">
+        <div style="display: flex; align-items: center;">
+          <div class="task-number">3</div>
+          <div>
+            <div style="font-weight: 700; font-size: 0.9375rem;">
+              {% if lang == 'am' %}የቀረቡ ክፍያዎችን ይገምግሙ <!-- needs native review -->{% else %}Approve Proposed Matches{% endif %}
+            </div>
+            <div style="font-size: 0.75rem; color: var(--color-text-muted); margin-top: 0.15rem;">
+              {% if proposed_items|length == 0 %}
+                ✓ {% if lang == 'am' %}ሁሉም ክፍያዎች ዛሬ ተረጋግጠዋል{% else %}All payments confirmed for today{% endif %}
+              {% else %}
+                <span id="step3-review-count" style="font-weight: 800; color: var(--color-primary);">{{ proposed_items|length }}</span>
+                {% if lang == 'am' %}ክፍያዎች የባለቤት ማረጋገጫ ይጠብቃሉ{% else %}suggested match(es) awaiting review{% endif %}
+              {% endif %}
+            </div>
           </div>
         </div>
-      </div>
-
-      <a href="#review-queue-section" class="w-full text-center block bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs py-2.5 rounded-lg transition mt-4">
-        Jump to Review Queue ↓
+        <div style="color: var(--color-text-muted); font-size: 0.8125rem; font-weight: 700; display: flex; align-items: center; gap: 0.35rem;">
+          <span class="badge {% if proposed_items %}badge-warning{% else %}badge-success{% endif %}">
+            {{ proposed_items|length }}
+          </span>
+          <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px;"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
+        </div>
       </a>
-    </div>
 
+    </div>
   </div>
 
-  <!-- Review Queue Component -->
-  <section id="review-queue-section" class="pt-2">
+  <!-- RECENTLY CONFIRMED MATCHES (DISCOVERABLE REVERSE LIST) -->
+  {% if recently_confirmed %}
+  <div class="card" style="margin-bottom: 0;">
+    <div class="card-header">
+      <h3 class="card-title" style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem;">
+        <svg class="icon" viewBox="0 0 24 24" style="color: var(--color-success);"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+        {% if lang == 'am' %}በቅርብ የተረጋገጡ ክፍያዎች (መመለሻ) <!-- needs native review -->{% else %}Recently Confirmed Matches{% endif %}
+      </h3>
+      <span style="font-size: 0.75rem; color: var(--color-text-muted);">
+        {% if user_role == 'owner' %}Owner Reversal Available{% endif %}
+      </span>
+    </div>
+    <div class="card-body" style="padding: 0;">
+      <div style="divide-y: 1px solid var(--color-border-subtle);">
+        {% for rc in recently_confirmed %}
+        <div style="padding: 0.85rem 1.25rem; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem; border-bottom: 1px solid var(--color-border-subtle);">
+          <div>
+            <div style="font-weight: 700; font-size: 0.875rem;">{{ rc.retailer_name }}</div>
+            <div style="font-size: 0.75rem; color: var(--color-text-muted);">
+              Invoice: <strong>{{ rc.invoice_number }}</strong> · Amount: <strong style="color: var(--color-primary);">{{ rc.matched_etb }}</strong> · {{ rc.confirmed_at }}
+            </div>
+          </div>
+          {% if user_role == 'owner' %}
+          <form method="POST" action="/matches/{{ rc.match_id }}/reverse" onsubmit="return confirm('Are you sure you want to reverse this match? This will restore open balances and log an audit reversal event.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="reason_code" value="WRONG_INVOICE">
+            <button type="submit" class="btn btn-secondary" style="min-height: 36px; padding: 0.25rem 0.75rem; font-size: 0.75rem; color: var(--color-danger); border-color: var(--color-danger-border);">
+              ↩ Reverse Match
+            </button>
+          </form>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- REVIEW QUEUE SECTION -->
+  <section id="review-queue-section">
     {% include "partials/review_queue.html" %}
   </section>
 
-  <!-- Aging Report Component -->
-  <section id="aging-section" class="pt-2">
+  <!-- AGING REPORT SECTION -->
+  <section id="aging-section">
     {% include "partials/aging_table.html" %}
   </section>
 
