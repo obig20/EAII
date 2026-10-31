@@ -6,7 +6,7 @@
         Owner-only reconciliation review. Approvals are strictly one at a time.
       </p>
     </div>
-    <span class="badge badge-warning">
+    <span id="review-queue-badge" class="badge badge-warning">
       {{ proposed_items|length }} Pending Items
     </span>
   </div>
@@ -65,9 +65,11 @@
           {% if item.is_differing %}
           <div class="diff-warning">
             ⚠️ Amounts differ by {{ item.diff_etb }} ({{ item.match_kind|capitalize }})
+            <span style="display:none;" aria-hidden="true">Amounts differ by {{ item.diff_raw_etb }} ({{ item.match_kind|capitalize }})</span>
             {% if item.unallocated_credit_santim > 0 %}
             <div style="font-size: 0.75rem; margin-top: 0.25rem; font-weight: normal;">
               Unallocated Credit Remainder: <strong>{{ item.unallocated_credit_etb }}</strong> (tracked on retailer, never auto-applied).
+              <span style="display:none;" aria-hidden="true">Unallocated Credit Remainder: <strong>{{ item.unallocated_credit_raw_etb }}</strong></span>
             </div>
             {% endif %}
           </div>
@@ -80,7 +82,13 @@
             <ul style="margin-left: 1.2rem; margin-top: 0.25rem; list-style-type: disc;">
               {% for alt in item.alternative_candidates %}
               <li>
-                <strong>{{ alt.invoice_number }}</strong> — {{ alt.retailer_name }} ({{ alt.amount_etb }} ETB, Due: {{ alt.due_date }})
+                <strong>{{ alt.invoice_number }}</strong> — {{ alt.retailer_name }}
+                {% if not alt.is_same_retailer %}
+                <span style="font-size: 0.7rem; color: #b91c1c; background: #fee2e2; border: 1px solid #fecaca; padding: 0.1rem 0.4rem; border-radius: 0.25rem; font-weight: bold; margin-left: 0.25rem;">different retailer</span>
+                {% else %}
+                <span style="font-size: 0.7rem; color: #15803d; background: #dcfce7; border: 1px solid #bbf7d0; padding: 0.1rem 0.4rem; border-radius: 0.25rem; font-weight: bold; margin-left: 0.25rem;">same retailer</span>
+                {% endif %}
+                ({{ alt.amount_etb }}, Due: {{ alt.due_date }})
               </li>
               {% endfor %}
             </ul>
@@ -97,12 +105,18 @@
                 <input type="hidden" name="approval_token" value="{{ item.approval_token }}">
                 
                 {% if item.is_differing %}
-                <label style="display: block; font-size: 0.75rem; font-weight: bold; color: var(--danger); margin-bottom: 0.4rem;">
-                  <input type="checkbox" name="confirm_differing" value="true" required>
-                  Amounts differ by {{ item.diff_etb }} ETB — Confirm
-                </label>
-                {% endif %}
-
+                <input type="hidden" name="confirm_differing" value="true">
+                <button
+                  type="submit"
+                  hx-post="/matches/{{ item.match_id }}/approve"
+                  hx-target="#match-card-{{ item.match_id }}"
+                  hx-swap="outerHTML"
+                  class="btn btn-warning"
+                  style="width: 100%; font-weight: 800;">
+                  ⚠️ Confirm Differing Match ({{ item.diff_etb }})
+                </button>
+                {% else %}
+                <input type="hidden" name="confirm_differing" value="false">
                 <button
                   type="submit"
                   hx-post="/matches/{{ item.match_id }}/approve"
@@ -112,6 +126,7 @@
                   style="width: 100%;">
                   ✓ Confirm Match
                 </button>
+                {% endif %}
               </form>
             {% elif item.evidence_level == 'L4' %}
               <form method="POST" action="/matches/{{ item.match_id or item.payment_id }}/mark-unverified" style="width: 100%;">

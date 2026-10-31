@@ -1092,3 +1092,163 @@ class TestStage1ReviewQueueCorrections:
         # Must contain escaped HTML entities
         assert "&lt;script&gt;alert(" in body or "&#39;xss&#39;" in body or "&apos;xss&apos;" in body
 
+    def test_match_review_card_context_parity_across_exact_partial_combined_overpayment(
+        self, client: TestClient, db_session: Session, tenant: Tenant, owner: User, retailer: Retailer
+    ):
+        """
+        Regression Test for Issue 1:
+        Asserts that card values, signed approval token, and approval route read
+        the exact same reconciliation values from compute_match_reconciliation_context
+        for exact, partial, combined, and overpayment cases.
+        """
+        from app.matching.context import compute_match_reconciliation_context
+        from app.kernel.tokens import generate_match_approval_token, verify_match_approval_token
+        from app.settings import settings
+
+        # 1. Exact case
+        inv_exact, pl_exact, pm_exact = create_invoice_and_match(
+            db_session, tenant, owner, retailer, state="proposed", inv_amount_santim=5000000, pl_amount_santim=5000000, matched_santim=5000000
+        )
+        ctx_exact = compute_match_reconciliation_context(
+            db_session, tenant_id=tenant.id, payment_match=pm_exact, payment_line=pl_exact, invoice=inv_exact
+        )
+        assert ctx_exact.match_kind == "exact"
+        assert ctx_exact.is_differing is False
+        assert ctx_exact.diff_santim == 0
+        assert ctx_exact.matched_santim == 5000000
+        assert ctx_exact.invoice_open_santim == 5000000
+        assert ctx_exact.payment_amount_santim == 5000000
+
+        # Token verification with context
+        tok = generate_match_approval_token(
+            settings.secret_key,
+            tenant_id=tenant.id,
+            user_id=owner.id,
+            match_id=pm_exact.id,
+            matched_santim=ctx_exact.matched_santim,
+            invoice_amount_santim=ctx_exact.invoice_total_santim,
+            payment_amount_santim=ctx_exact.payment_amount_santim,
+            match_state=pm_exact.state,
+        )
+        valid, _ = verify_match_approval_token(
+            settings.secret_key,
+            tok,
+            expected_tenant_id=tenant.id,
+            expected_user_id=owner.id,
+            expected_match_id=pm_exact.id,
+            current_matched_santim=ctx_exact.matched_santim,
+            current_invoice_amount_santim=ctx_exact.invoice_total_santim,
+            current_payment_amount_santim=ctx_exact.payment_amount_santim,
+            current_match_state=pm_exact.state,
+        )
+        assert valid is True
+
+        # 2. Partial case
+        inv_part, pl_part, pm_part = create_invoice_and_match(
+            db_session, tenant, owner, retailer, state="proposed", inv_amount_santim=12000000, pl_amount_santim=8000000, matched_santim=8000000
+        )
+        ctx_part = compute_match_reconciliation_context(
+            db_session, tenant_id=tenant.id, payment_match=pm_part, payment_line=pl_part, invoice=inv_part
+        )
+        assert ctx_part.match_kind == "partial"
+        assert ctx_part.is_differing is True
+        assert ctx_part.diff_santim == 4000000  # 120,000 - 80,000 = 40,000 ETB
+        assert ctx_part.matched_santim == 8000000
+        assert ctx_part.invoice_open_santim == 12000000
+        assert ctx_part.payment_amount_santim == 8000000
+
+        # 3. Overpayment case
+        inv_over, pl_over, pm_over = create_invoice_and_match(
+            db_session, tenant, owner, retailer, state="proposed", inv_amount_santim=4000000, pl_amount_santim=5500000
+        )
+        pm_over.matched_santim = 4000000  # Matched up to invoice open balance
+        db_session.flush()
+        ctx_over = compute_match_reconciliation_context(
+            db_session, tenant_id=tenant.id, payment_match=pm_over, payment_line=pl_over, invoice=inv_over
+        )
+        assert ctx_over.match_kind == "overpayment"
+        assert ctx_over.is_differing is True
+        assert ctx_over.diff_santim == 1500000  # 55,000 - 40,000 = 15,000 ETB
+        assert ctx_over.unallocated_credit_santim == 1500000
+        assert ctx_over.matched_santim == 4000000
+        assert ctx_over.invoice_open_santim == 4000000
+        assert ctx_over.payment_amount_santim == 5500000
+
+        # 4. Combined case
+        inv_comb1, pl_comb, pm_comb1 = create_invoice_and_match(
+            db_session, tenant, owner, retailer, state="proposed", inv_amount_santim=6000000, pl_amount_santim=10000000
+        )
+        pm_comb1.matched_santim = 6000000
+        # Second match on same payment line
+        inv_comb2 = Invoice(
+            id=uuid.uuid4(),
+            tenant_id=tenant.id,
+            invoice_number=f"INV-COMB-2-{uuid.uuid4().hex[:4]}",
+            retailer_id=retailer.id,
+            amount_santim=4000000,
+            issued_date=datetime.now(timezone.utc).date(),
+            due_date=datetime.now(timezone.utc).date() + timedelta(days=30),
+            state="open",
+            created_at=datetime.now(timezone.utc),
+            created_by=owner.id,
+        )
+        db_session.add(inv_comb2)
+        db_session.flush()
+        pm_comb2 = PaymentMatch(
+            id=uuid.uuid4(),
+            tenant_id=tenant.id,
+            payment_line_id=pl_comb.id,
+            invoice_id=inv_comb2.id,
+            matched_santim=4000000,
+            tier="tier_a",
+            state="proposed",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(pm_comb2)
+        db_session.flush()
+
+        ctx_comb1 = compute_match_reconciliation_context(
+            db_session, tenant_id=tenant.id, payment_match=pm_comb1, payment_line=pl_comb, invoice=inv_comb1
+        )
+        assert ctx_comb1.match_kind == "combined"
+        assert ctx_comb1.is_differing is True
+        assert ctx_comb1.matched_santim == 6000000
+        assert ctx_comb1.payment_amount_santim == 10000000
+
+    def test_demo_creation_and_passwords_refuse_in_production(self, db_session: Session, monkeypatch):
+        """
+        Verify that create_demo_tenant and reset_demo_tenant refuse to run
+        when app_env is production.
+        """
+        import pytest
+        from app.settings import settings
+        from app.demo.generator import create_demo_tenant
+        from app.demo.reset import reset_demo_tenant
+
+        monkeypatch.setattr(settings, "app_env", "production")
+
+        with pytest.raises(RuntimeError, match="strictly forbidden when APP_ENV=production"):
+            create_demo_tenant(db_session, "Prod Demo", "owner@prod.et", "Prod Owner", "SecureDemoPass123!")
+
+        with pytest.raises(PermissionError, match="strictly forbidden when APP_ENV=production"):
+            reset_demo_tenant(db_session, uuid.uuid4())
+
+    def test_review_queue_count_decrements_and_syncs_with_cards(
+        self, client: TestClient, db_session: Session, tenant: Tenant, owner: User, retailer: Retailer
+    ):
+        """
+        Verify that approving or rejecting a match returns out-of-band updates
+        for the review queue count, keeping the badge and KPI card in sync.
+        """
+        inv, pl, pm = create_invoice_and_match(
+            db_session, tenant, owner, retailer, state="proposed", inv_amount_santim=3500000, pl_amount_santim=3500000, matched_santim=3500000
+        )
+        authenticate_client(client, db_session, owner)
+
+        res = client.post(f"/matches/{pm.id}/approve", headers={"hx-request": "true"})
+        assert res.status_code == 200
+        assert "hx-swap-oob=" in res.text
+        assert "id='review-queue-badge'" in res.text or 'id="review-queue-badge"' in res.text
+        assert "id='kpi-review-queue'" in res.text or 'id="kpi-review-queue"' in res.text
+
+

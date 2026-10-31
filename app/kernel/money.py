@@ -80,6 +80,25 @@ def to_etb(santim: Santim) -> str:
     return f"{sign}{birr}.{cents:02d} ETB"
 
 
+def format_money(santim: Santim, include_currency: bool = True) -> str:
+    """
+    Format integer santim with thousands separators and optional ETB currency symbol.
+    Uses integer arithmetic only — no floats.
+
+    Examples:
+        format_money(12550000)       -> "125,500.00 ETB"
+        format_money(12550000, False)-> "125,500.00"
+    """
+    if not isinstance(santim, int):
+        raise TypeError(f"format_money expects int santim, got {type(santim).__name__!r}")
+    sign = "-" if santim < 0 else ""
+    abs_santim = abs(santim)
+    birr = abs_santim // 100
+    cents = abs_santim % 100
+    curr = " ETB" if include_currency else ""
+    return f"{sign}{birr:,}.{cents:02d}{curr}"
+
+
 def santim_from_etb_string(etb_str: str) -> Santim:
     """
     Parse a decimal ETB string (e.g. "125.50") to integer santim.

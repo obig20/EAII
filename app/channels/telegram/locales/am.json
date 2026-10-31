@@ -28,5 +28,11 @@
   "match_reversed": "✓ ማዛመጃው ተሰርዟል። የደረሰኝ እና የክፍያ ቀሪ ሂሳብ ተመልሷል።",
   "previously_reversed_badge": "ቀደም ሲል የተመለሰ",
   "relied_on_l3_badge": "⚠️ በL3 የደንበኛ ማረጋገጫ ላይ የተመሰረተ",
-  "unallocated_credit": "ያልተመደበ ክሬዲት፡ {amount_etb} ብር"
+  "unallocated_credit": "ያልተመደበ ክሬዲት፡ {amount_etb} ብር",
+  "match_already_confirmed": "ይህ የክፍያ ማዛመጃ ከዚህ በፊት ጸድቋል።",
+  "match_already_reversed": "ይህ የክፍያ ማዛመጃ የተመለሰ በመሆኑ እንደገና ሊጸድቅ አይችልም።",
+  "match_not_found": "የክፍያ ማዛመጃው አልተገኘም።",
+  "stale_token_error": "መረጃው በሌላ እርምጃ ተቀይሯል። እባክዎ ገጹን ያድሱ።",
+  "amounts_differ_confirmation_required": "በክፍያው እና በክፍት ደረሰኙ ቀሪ ሂሳብ መካከል ልዩነት አለ። ግልጽ ማረጋገጫ ያስፈልጋል።",
+  "invalid_approval_token": "ልክ ያልሆነ ወይም ጊዜው ያለፈበት የማጽደቂያ ማስረጃ።"
 }

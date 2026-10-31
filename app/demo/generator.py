@@ -531,6 +531,15 @@ def seed_demo_data(
     }
 
 
+KNOWN_DEMO_PASSWORDS = {
+    "DemoDailyClose2026!",
+    "SecureDemoPass123!",
+    "demo",
+    "password",
+    "admin",
+}
+
+
 def create_demo_tenant(
     session: Session,
     tenant_name: str = "Addis Wholesale Demo / አዲስ ጅምላ ማሳያ",
@@ -541,6 +550,13 @@ def create_demo_tenant(
     """
     Create a fresh Demo tenant and seed it with realistic Addis wholesale data.
     """
+    from app.settings import settings
+
+    if getattr(settings, "app_env", "").lower() == "production":
+        raise RuntimeError("Demo tenant creation and seeding are strictly forbidden when APP_ENV=production.")
+
+    if owner_password in KNOWN_DEMO_PASSWORDS and getattr(settings, "app_env", "").lower() == "production":
+        raise RuntimeError("Known demo passwords cannot be used in production.")
     clean_id = normalize_identifier(owner_identifier)
     email = clean_id if "@" in clean_id else None
     phone = clean_id if "@" not in clean_id else None

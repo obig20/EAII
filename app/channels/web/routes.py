@@ -54,7 +54,9 @@ from app.kernel.enums import EvidenceLevel, InvoiceState, MatchState, PaymentSta
 from app.kernel.events import append_event
 from app.kernel.guards import InsufficientEvidenceError, assert_confirmable
 from app.kernel.models import ImportBatch, Invoice, PaymentLine, PaymentMatch, ProcessedApprovalToken, RateLimitBucket, Retailer, ReversalNote, Session as SessionModel, Tenant, User
-from app.kernel.money import to_etb
+from app.channels.telegram.i18n import t
+from app.kernel.money import format_money, to_etb
+from app.matching.context import compute_match_reconciliation_context
 from app.kernel.tokens import generate_match_approval_token, hash_approval_token, verify_match_approval_token
 from app.kernel.persistent_rate_limit import (
     RateLimitExceededError,
@@ -85,6 +87,20 @@ from app.settings import settings
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+templates.env.filters["format_money"] = format_money
+
+
+def format_match_error_response(request: Request, locale_key: str, status_code: int = 400, detail: str = "") -> Response:
+    lang = request.cookies.get("lang", "en")
+    msg = t(locale_key, lang=lang) if locale_key else detail
+    if not msg or msg == locale_key:
+        msg = detail or "An error occurred."
+    if request.headers.get("hx-request") or "text/html" in request.headers.get("accept", ""):
+        return HTMLResponse(
+            f"<div class='p-3 text-xs font-bold text-rose-800 bg-rose-50 border border-rose-200 rounded-lg'>✕ {msg}</div>",
+            status_code=200,
+        )
+    raise HTTPException(status_code=status_code, detail=detail or msg)
 
 # File upload security limits
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB limit
@@ -587,53 +603,30 @@ def dashboard(
         match_kind = "exact"
         unallocated_credit_santim = 0
         unallocated_credit_etb = "0.00"
+        diff_raw_etb = "0.00"
+        unallocated_credit_raw_etb = "0.00"
         is_differing = False
         approval_token = ""
         alt_candidates = []
 
         if pm and target_inv:
             target_invs = target_inv.invoice_number
-
-            # Query existing confirmed paid santim on target invoice (excluding this match)
-            inv_confirmed_paid = session.execute(
-                select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
-                .where(
-                    PaymentMatch.invoice_id == target_inv.id,
-                    PaymentMatch.state == MatchState.CONFIRMED.value,
-                    PaymentMatch.id != pm.id,
-                )
-            ).scalar_one()
-            inv_open_balance_santim = max(0, int(target_inv.amount_santim) - int(inv_confirmed_paid))
-
-            # Sum all proposed & confirmed matches on this payment line
-            pl_total_matched = session.execute(
-                select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
-                .where(
-                    PaymentMatch.payment_line_id == pl.id,
-                    PaymentMatch.state.in_([MatchState.CONFIRMED.value, MatchState.PROPOSED.value]),
-                )
-            ).scalar_one()
-            pl_total_matched = int(pl_total_matched)
-
-            # Determine differing status precisely (matched amount differs from invoice open balance OR payment total)
-            is_differing = (int(pm.matched_santim) != int(inv_open_balance_santim)) or (int(pl.amount_santim) != int(pm.matched_santim))
-
-            if pl.amount_santim > pm.matched_santim and pl_total_matched > pm.matched_santim:
-                match_kind = "combined"
-                diff_santim = int(abs(pl.amount_santim - pm.matched_santim))
-            elif pl.amount_santim > inv_open_balance_santim:
-                match_kind = "overpayment"
-                diff_santim = int(pl.amount_santim - inv_open_balance_santim)
-                unallocated_credit_santim = int(max(0, pl.amount_santim - pm.matched_santim))
-                unallocated_credit_etb = to_etb(unallocated_credit_santim)
-            elif pm.matched_santim < inv_open_balance_santim:
-                match_kind = "partial"
-                diff_santim = int(inv_open_balance_santim - pm.matched_santim)
-            else:
-                match_kind = "exact"
-                diff_santim = 0
-
-            diff_etb = to_etb(diff_santim)
+            ctx = compute_match_reconciliation_context(
+                session,
+                tenant_id=tenant.id,
+                payment_match=pm,
+                payment_line=pl,
+                invoice=target_inv,
+            )
+            inv_open_balance_santim = ctx.invoice_open_santim
+            diff_santim = ctx.diff_santim
+            diff_etb = format_money(diff_santim, include_currency=True)
+            match_kind = ctx.match_kind
+            unallocated_credit_santim = ctx.unallocated_credit_santim
+            unallocated_credit_etb = format_money(unallocated_credit_santim, include_currency=True)
+            diff_raw_etb = to_etb(diff_santim)
+            unallocated_credit_raw_etb = to_etb(unallocated_credit_santim)
+            is_differing = ctx.is_differing
 
             # Generate HMAC-signed stale-view token with tenant and user scope
             approval_token = generate_match_approval_token(
@@ -641,13 +634,13 @@ def dashboard(
                 tenant_id=tenant.id,
                 user_id=user.id,
                 match_id=pm.id,
-                matched_santim=pm.matched_santim,
-                invoice_amount_santim=target_inv.amount_santim,
-                payment_amount_santim=pl.amount_santim,
+                matched_santim=ctx.matched_santim,
+                invoice_amount_santim=ctx.invoice_total_santim,
+                payment_amount_santim=ctx.payment_amount_santim,
                 match_state=pm.state,
             )
 
-            # Query up to 2 alternative open candidate invoices
+            # Query alternative candidate open invoices: prioritize same-retailer first
             alt_rows = session.execute(
                 select(Invoice)
                 .where(
@@ -660,22 +653,28 @@ def dashboard(
                     func.abs(Invoice.amount_santim - pl.amount_santim).asc(),
                     Invoice.issued_date.desc(),
                 )
-                .limit(2)
+                .limit(3)
             ).scalars().all()
 
             for alt_inv in alt_rows:
                 alt_ret_name = alt_inv.retailer.name if alt_inv.retailer else "Unknown"
+                is_same = (alt_inv.retailer_id == target_inv.retailer_id)
                 alt_candidates.append({
                     "invoice_number": alt_inv.invoice_number,
                     "retailer_name": alt_ret_name,
-                    "amount_etb": to_etb(alt_inv.amount_santim),
-                    "due_date": alt_inv.due_date.strftime("%d %b %Y"),
+                    "amount_etb": format_money(alt_inv.amount_santim, include_currency=True),
+                    "due_date": alt_inv.due_date.strftime("%d/%m/%Y") if alt_inv.due_date else "N/A",
+                    "is_same_retailer": is_same,
+                    "retailer_label": "same retailer" if is_same else "different retailer",
                 })
 
             # Plain-language "Why it matched" built from structured fields (No AI)
             ret_display = target_inv.retailer.name if target_inv.retailer else "Unknown"
             if pm.tier == "tier_a":
-                reason = f"Tier A exact match: invoice number '{target_inv.invoice_number}' matched in payment reference with equal amount"
+                if is_differing:
+                    reason = f"Tier A reference match: invoice '{target_inv.invoice_number}' referenced with {match_kind} amount"
+                else:
+                    reason = f"Tier A exact match: invoice number '{target_inv.invoice_number}' matched in payment reference with equal amount"
             elif pm.tier == "tier_b":
                 reason = f"Tier B match: counterparty phone/account or invoice token matched for retailer '{ret_display}' within date window"
             else:
@@ -686,26 +685,28 @@ def dashboard(
         proposed_items.append({
             "payment_id": str(pl.id),
             "match_id": match_id,
-            "amount_etb": to_etb(pl.amount_santim),
+            "amount_etb": format_money(pl.amount_santim, include_currency=True),
             "amount_santim": pl.amount_santim,
-            "value_date": pl.value_date.strftime("%d %b %Y"),
+            "value_date": pl.value_date.strftime("%d/%m/%Y"),
             "evidence_level": pl.evidence_level,
             "counterparty_name": pl.counterparty_name,
             "counterparty_account": pl.counterparty_account,
             "raw_reference": pl.raw_reference,
             "target_invoice_numbers": target_invs,
             "target_invoice": target_inv,
-            "invoice_amount_etb": to_etb(target_inv.amount_santim) if target_inv else "0.00",
-            "invoice_issued_date": target_inv.issued_date.strftime("%d %b %Y") if target_inv and target_inv.issued_date else "N/A",
-            "invoice_due_date": target_inv.due_date.strftime("%d %b %Y") if target_inv else "N/A",
+            "invoice_amount_etb": format_money(target_inv.amount_santim, include_currency=True) if target_inv else "0.00 ETB",
+            "invoice_issued_date": target_inv.issued_date.strftime("%d/%m/%Y") if target_inv and target_inv.issued_date else "N/A",
+            "invoice_due_date": target_inv.due_date.strftime("%d/%m/%Y") if target_inv else "N/A",
             "retailer_name": target_inv.retailer.name if target_inv and target_inv.retailer else (pl.counterparty_name or "Unknown"),
             "retailer_phone": target_inv.retailer.phone if target_inv and target_inv.retailer else "N/A",
             "reason": reason,
             "is_ambiguous": is_ambiguous,
             "is_differing": is_differing,
             "diff_etb": diff_etb,
+            "diff_raw_etb": diff_raw_etb,
             "match_kind": match_kind,
             "unallocated_credit_etb": unallocated_credit_etb,
+            "unallocated_credit_raw_etb": unallocated_credit_raw_etb,
             "unallocated_credit_santim": unallocated_credit_santim,
             "approval_token": approval_token,
             "alternative_candidates": alt_candidates,
@@ -929,6 +930,7 @@ async def upload_statement(
 @router.post("/matches/{match_id}/approve")
 def approve_match(
     match_id: str,
+    request: Request,
     approval_token: str = Form(""),
     confirm_differing: bool = Form(False),
     session: Session = Depends(get_session),
@@ -1010,6 +1012,15 @@ def approve_match(
         .with_for_update()
     ).scalar_one()
 
+    # Compute canonical reconciliation context
+    ctx = compute_match_reconciliation_context(
+        session,
+        tenant_id=tenant.id,
+        payment_match=pm,
+        payment_line=pl,
+        invoice=inv,
+    )
+
     # Verify HMAC-signed stale-view token if provided (scope, 30m expiry, amounts parity)
     if approval_token:
         is_valid, err_msg = verify_match_approval_token(
@@ -1018,57 +1029,45 @@ def approve_match(
             expected_tenant_id=tenant.id,
             expected_user_id=user.id,
             expected_match_id=pm.id,
-            current_matched_santim=pm.matched_santim,
-            current_invoice_amount_santim=inv.amount_santim,
-            current_payment_amount_santim=pl.amount_santim,
+            current_matched_santim=ctx.matched_santim,
+            current_invoice_amount_santim=ctx.invoice_total_santim,
+            current_payment_amount_santim=ctx.payment_amount_santim,
             current_match_state=pm.state,
         )
         if not is_valid:
-            raise HTTPException(
+            return format_match_error_response(
+                request,
+                "stale_token_error",
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Stale view or invalid token: {err_msg}",
             )
 
-    # Compute allocations and open balance strictly inside locked transaction
-    prior_pl_allocated = session.execute(
-        select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
-        .where(
-            PaymentMatch.payment_line_id == pl.id,
-            PaymentMatch.state == MatchState.CONFIRMED.value,
-            PaymentMatch.id != pm.id,
-        )
-    ).scalar_one()
-
-    total_confirmed_allocations = int(prior_pl_allocated) + int(pm.matched_santim)
-    if total_confirmed_allocations > pl.amount_santim:
-        raise HTTPException(
+    prior_pl_allocated = ctx.prior_pl_allocated_santim
+    total_confirmed_allocations = prior_pl_allocated + ctx.matched_santim
+    if total_confirmed_allocations > ctx.payment_amount_santim:
+        return format_match_error_response(
+            request,
+            "match_already_confirmed",
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Payment line is already confirmed or fully allocated ({prior_pl_allocated}/{pl.amount_santim} santim).",
+            detail=f"Payment line is already confirmed or fully allocated ({prior_pl_allocated}/{ctx.payment_amount_santim} santim).",
         )
 
-    inv_paid = session.execute(
-        select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
-        .where(
-            PaymentMatch.invoice_id == inv.id,
-            PaymentMatch.state == MatchState.CONFIRMED.value,
-            PaymentMatch.id != pm.id,
-        )
-    ).scalar_one()
-
-    if int(inv_paid) >= inv.amount_santim:
-        raise HTTPException(
+    if ctx.invoice_open_santim <= 0:
+        return format_match_error_response(
+            request,
+            "match_already_confirmed",
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Invoice {inv.invoice_number} is already fully settled ({inv_paid}/{inv.amount_santim} santim).",
+            detail=f"Invoice {inv.invoice_number} is already fully settled.",
         )
 
-    open_balance = max(0, int(inv.amount_santim) - int(inv_paid))
-
-    # Differing amount check: matched portion != open balance OR payment line total != matched portion
-    is_differing = (int(pm.matched_santim) != int(open_balance)) or (int(pl.amount_santim) != int(pm.matched_santim))
+    open_balance = ctx.invoice_open_santim
+    is_differing = ctx.is_differing
     if is_differing and not confirm_differing:
-        raise HTTPException(
+        return format_match_error_response(
+            request,
+            "amounts_differ_confirmation_required",
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Amounts differ (Match: {to_etb(int(pm.matched_santim))} ETB, Invoice Open: {to_etb(int(open_balance))} ETB, Payment: {to_etb(int(pl.amount_santim))} ETB). Explicit confirmation required.",
+            detail=f"Amounts differ (Match: {format_money(ctx.matched_santim)}, Invoice Open: {format_money(ctx.invoice_open_santim)}, Payment: {format_money(ctx.payment_amount_santim)}). Explicit confirmation required.",
         )
 
     now = datetime.now(timezone.utc)
@@ -1082,7 +1081,8 @@ def approve_match(
         pl.state = PaymentState.PROPOSED.value
 
     # Update invoice state
-    new_inv_paid = int(inv_paid) + pm.matched_santim
+    prior_inv_paid = ctx.invoice_total_santim - ctx.invoice_open_santim
+    new_inv_paid = prior_inv_paid + pm.matched_santim
     if new_inv_paid >= inv.amount_santim:
         inv.state = InvoiceState.SETTLED.value
     else:
@@ -1116,7 +1116,20 @@ def approve_match(
     )
 
     session.commit()
-    return HTMLResponse("<div class='p-3 text-xs font-bold text-emerald-800 bg-emerald-50 rounded-lg'>✓ Match Confirmed</div>")
+    rem_count = session.execute(
+        select(func.count(PaymentMatch.id))
+        .where(
+            PaymentMatch.tenant_id == tenant.id,
+            PaymentMatch.state == MatchState.PROPOSED.value,
+        )
+    ).scalar_one()
+
+    return HTMLResponse(
+        "<div class='p-3 text-xs font-bold text-emerald-800 bg-emerald-50 rounded-lg'>✓ Match Confirmed</div>"
+        f"<span id='review-queue-badge' hx-swap-oob='true' class='badge badge-warning'>{rem_count} Pending Items</span>"
+        f"<div id='kpi-review-queue' hx-swap-oob='true' class='text-2xl font-black text-amber-600 mt-1'>{rem_count}</div>"
+        f"<div id='step3-review-count' hx-swap-oob='true' class='text-3xl font-black text-amber-600'>{rem_count}</div>"
+    )
 
 
 @router.post("/matches/{match_id}/reverse")
@@ -1288,10 +1301,21 @@ def mark_unverified(
     pl.state = PaymentState.ACCEPTED_UNVERIFIED.value
     session.commit()
 
+    rem_count = session.execute(
+        select(func.count(PaymentMatch.id))
+        .where(
+            PaymentMatch.tenant_id == tenant.id,
+            PaymentMatch.state == MatchState.PROPOSED.value,
+        )
+    ).scalar_one()
+
     return HTMLResponse(
         "<div class='p-3 text-xs font-bold text-purple-900 bg-purple-50 rounded-lg'>"
         "✓ Marked Accepted Unverified (L4). Excluded from all paid reports."
         "</div>"
+        f"<span id='review-queue-badge' hx-swap-oob='true' class='badge badge-warning'>{rem_count} Pending Items</span>"
+        f"<div id='kpi-review-queue' hx-swap-oob='true' class='text-2xl font-black text-amber-600 mt-1'>{rem_count}</div>"
+        f"<div id='step3-review-count' hx-swap-oob='true' class='text-3xl font-black text-amber-600'>{rem_count}</div>"
     )
 
 
@@ -1320,7 +1344,20 @@ def reject_match(
             pl.state = PaymentState.REJECTED.value
 
     session.commit()
-    return HTMLResponse("<div class='p-3 text-xs font-bold text-slate-500 bg-slate-100 rounded-lg'>✕ Match Rejected</div>")
+    rem_count = session.execute(
+        select(func.count(PaymentMatch.id))
+        .where(
+            PaymentMatch.tenant_id == tenant.id,
+            PaymentMatch.state == MatchState.PROPOSED.value,
+        )
+    ).scalar_one()
+
+    return HTMLResponse(
+        "<div class='p-3 text-xs font-bold text-slate-500 bg-slate-100 rounded-lg'>✕ Match Rejected</div>"
+        f"<span id='review-queue-badge' hx-swap-oob='true' class='badge badge-warning'>{rem_count} Pending Items</span>"
+        f"<div id='kpi-review-queue' hx-swap-oob='true' class='text-2xl font-black text-amber-600 mt-1'>{rem_count}</div>"
+        f"<div id='step3-review-count' hx-swap-oob='true' class='text-3xl font-black text-amber-600'>{rem_count}</div>"
+    )
 
 
 # ---------------------------------------------------------------------------

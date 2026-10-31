@@ -37,11 +37,15 @@ def reset_demo_tenant(session: Session, tenant_id: uuid.UUID) -> None:
     Strict Safety Guard:
       Asserts that tenant.is_demo is True. Raises PermissionError otherwise.
     """
+    # 1. HARD SAFETY GUARD: Never allow resetting in production or non-demo tenants!
+    from app.settings import settings
+    if getattr(settings, "app_env", "").lower() == "production":
+        raise PermissionError("Demo tenant reset is strictly forbidden when APP_ENV=production.")
+
     tenant = session.get(Tenant, tenant_id)
     if not tenant:
         raise ValueError(f"Tenant {tenant_id} not found.")
 
-    # 1. HARD SAFETY GUARD: Never allow resetting a production tenant!
     if not tenant.is_demo:
         raise PermissionError(
             f"Safety Violation: Tenant {tenant.id} ('{tenant.name}') is NOT a demo tenant. Reset aborted."

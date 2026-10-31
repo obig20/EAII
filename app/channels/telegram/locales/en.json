@@ -28,5 +28,11 @@
   "match_reversed": "✓ Match reversed successfully. Balances restored.",
   "previously_reversed_badge": "Previously Reversed",
   "relied_on_l3_badge": "⚠️ Relied on L3 Retailer Confirmation",
-  "unallocated_credit": "Unallocated Credit: {amount_etb} ETB"
+  "unallocated_credit": "Unallocated Credit: {amount_etb} ETB",
+  "match_already_confirmed": "This payment match is already confirmed.",
+  "match_already_reversed": "This payment match has been reversed and cannot be re-approved.",
+  "match_not_found": "Payment match not found.",
+  "stale_token_error": "Reconciliation record was updated by another action. Please refresh the page.",
+  "amounts_differ_confirmation_required": "Amounts differ between payment and open invoice balance. Explicit confirmation required.",
+  "invalid_approval_token": "Invalid or expired approval token."
 }

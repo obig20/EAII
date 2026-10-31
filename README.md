@@ -167,6 +167,156 @@ Simulating 30 retailers, 300 invoices, 400 payment lines across 10 noise pattern
 
 ---
 
+## 🎭 Wholesale Demo Environment & Database (`dailyclose_demo`)
+
+Daily Close includes a pre-packaged, realistic demo mode representing a Merkato/Sebategna wholesale distributor (12 retailers, 30 invoices, 9 statement payment lines).
+
+To guarantee strict isolation and eliminate any risk of accidental contamination or data loss in production/development databases, demo operations should run against a dedicated PostgreSQL database named **`dailyclose_demo`**.
+
+### 1. Database Provisioning & Migration
+```bash
+# Create dedicated demo database in PostgreSQL
+createdb -h localhost -p 5432 -U postgres dailyclose_demo
+
+# Apply schema migrations to dailyclose_demo
+DATABASE_URL=postgresql://app:app_password@localhost:5432/dailyclose_demo alembic upgrade head
+```
+
+### 2. Demo Tenant Creation & Baseline Population
+```bash
+DATABASE_URL=postgresql://app:app_password@localhost:5432/dailyclose_demo \
+python -m app.cli create-demo
+```
+This populates:
+- **Tenant:** Addis Wholesale Demo / አዲስ ጅምላ ማሳያ (`is_demo=True`)
+- **Owner Account:** Ato Demo Owner (`demo.owner@dailyclose.et` / `+251911999901`) with password `DemoOwner123!`
+- **Cashier Account:** W/ro Demo Cashier (`demo.cashier@dailyclose.et` / `+251922999902`) with password `DemoCashier123!`
+- **12 Retailers:** Merkato, Piassa, Bole, Mexico, etc.
+- **30 Invoices:** Spread across all 5 AR aging buckets (Current, 1-30, 31-60, 61-90, 90+ days overdue).
+- **9 Bank/Telebirr Lines:** Demonstrating Tier A auto-confirmation, Tier B review queue, Tier C fuzzy match, partial payment with warning, overpayment with unallocated credit, and L4 unverified receipts.
+
+### 3. Production Safety Guard
+> [!IMPORTANT]
+> **Production Guard:** `create-demo`, `reset-demo`, and hardcoded demo passwords refuse to run whenever `APP_ENV=production` (`RuntimeError` or `PermissionError`). Demo data can never be seeded into or wiped from a production tenant.
+
+---
+
+## 🖥️ Command-Line Interface (CLI)
+
+Daily Close provides an administrative CLI via `python -m app.cli`. Below is the complete syntax and flag options extracted directly from `--help`:
+
+### 1. `bootstrap-owner`
+Bootstrap initial tenant and owner account.
+```text
+usage: cli.py bootstrap-owner [-h] --tenant TENANT --identifier IDENTIFIER
+                              --name NAME [--password PASSWORD]
+
+options:
+  -h, --help            show this help message and exit
+  --tenant TENANT       Tenant / Business name
+  --identifier IDENTIFIER
+                        Owner email or phone (+251...)
+  --name NAME           Owner display name
+  --password PASSWORD   Owner password (min 10 chars; prompts if omitted)
+```
+
+### 2. `create-telegram-invite`
+Generate Telegram registration invite code.
+```text
+usage: cli.py create-telegram-invite [-h] --tenant-id TENANT_ID
+                                     --role {owner,cashier} --name NAME
+                                     [--days DAYS]
+
+options:
+  -h, --help            show this help message and exit
+  --tenant-id TENANT_ID
+                        Tenant UUID
+  --role {owner,cashier}
+                        User role
+  --name NAME           Staff display name
+  --days DAYS           Expiry in days (default: 7)
+```
+
+### 3. `prune-auth-failures`
+Prune auth_failures older than N days.
+```text
+usage: cli.py prune-auth-failures [-h] [--days DAYS]
+
+options:
+  -h, --help   show this help message and exit
+  --days DAYS  Prune failures older than N days (default: 7)
+```
+
+### 4. `unlock-user`
+Unlock a locked user account and reset failed login attempts.
+```text
+usage: cli.py unlock-user [-h] --identifier IDENTIFIER
+
+options:
+  -h, --help            show this help message and exit
+  --identifier IDENTIFIER
+                        User email or phone (+251...)
+```
+
+### 5. `create-demo`
+Create a realistic Addis Ababa wholesale demo tenant.
+```text
+usage: cli.py create-demo [-h] [--tenant TENANT] [--identifier IDENTIFIER]
+                          [--name NAME] [--password PASSWORD]
+
+options:
+  -h, --help            show this help message and exit
+  --tenant TENANT       Demo tenant name
+  --identifier IDENTIFIER
+                        Owner login identifier
+  --name NAME           Owner display name
+  --password PASSWORD   Owner password (min 10 chars)
+```
+
+### 6. `reset-demo`
+Safely reset a demo tenant back to baseline data.
+```text
+usage: cli.py reset-demo [-h] --tenant-id TENANT_ID
+
+options:
+  -h, --help            show this help message and exit
+  --tenant-id TENANT_ID
+                        Demo Tenant UUID
+```
+
+### 7. `health-check`
+Run Collections Health Check diagnostic.
+```text
+usage: cli.py health-check [-h] --invoices INVOICES
+                           --statements STATEMENTS [STATEMENTS ...]
+                           [--out OUT] [--lang {en,am}] [--map MAP] [--keep]
+
+options:
+  -h, --help            show this help message and exit
+  --invoices INVOICES   Path to credit sales / invoices CSV
+  --statements STATEMENTS [STATEMENTS ...]
+                        Path to one or more bank/mobile money statement files
+                        (CSV/XLSX)
+  --out OUT             Output path for self-contained HTML report (default:
+                        report.html)
+  --lang {en,am}        Report language: 'en' (English) or 'am' (Amharic)
+                        (default: en)
+  --map MAP             Optional JSON file for column mappings
+  --keep                Keep the temporary tenant data instead of rolling
+                        back/deleting
+```
+
+### 8. `release-gate`
+Run full release gate verification.
+```text
+usage: cli.py release-gate [-h]
+
+options:
+  -h, --help  show this help message and exit
+```
+
+---
+
 ## 🚢 Single-Host Linux Deployment (Addis Ababa)
 
 A complete deployment package is included in the `deploy/` directory:

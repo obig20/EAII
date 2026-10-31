@@ -227,6 +227,11 @@ def unlock_user(args: argparse.Namespace) -> int:
 def cli_create_demo(args: argparse.Namespace) -> int:
     """Create a realistic Addis Ababa wholesale demo tenant."""
     from app.demo.generator import create_demo_tenant
+    from app.settings import settings
+
+    if getattr(settings, "app_env", "").lower() == "production":
+        print("Error: Demo creation is strictly forbidden in production (APP_ENV=production).", file=sys.stderr)
+        return 1
 
     tenant_name = args.tenant.strip()
     identifier = args.identifier.strip()
@@ -234,13 +239,17 @@ def cli_create_demo(args: argparse.Namespace) -> int:
     password = args.password.strip()
 
     with session_scope() as session:
-        tenant, owner = create_demo_tenant(
-            session,
-            tenant_name=tenant_name,
-            owner_identifier=identifier,
-            owner_name=display_name,
-            owner_password=password,
-        )
+        try:
+            tenant, owner = create_demo_tenant(
+                session,
+                tenant_name=tenant_name,
+                owner_identifier=identifier,
+                owner_name=display_name,
+                owner_password=password,
+            )
+        except RuntimeError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
         print(f"Successfully created Demo Wholesaler:")
         print(f"  Tenant:       {tenant.name} ({tenant.id}) [is_demo=True]")
         print(f"  Owner Login:  {identifier}")
@@ -252,6 +261,11 @@ def cli_create_demo(args: argparse.Namespace) -> int:
 def cli_reset_demo(args: argparse.Namespace) -> int:
     """Safely reset a demo tenant back to baseline data."""
     from app.demo.reset import reset_demo_tenant
+    from app.settings import settings
+
+    if getattr(settings, "app_env", "").lower() == "production":
+        print("Error: Demo reset is strictly forbidden in production (APP_ENV=production).", file=sys.stderr)
+        return 1
 
     tenant_id_str = args.tenant_id.strip()
     try:
