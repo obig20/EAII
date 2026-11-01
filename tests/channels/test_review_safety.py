@@ -1727,3 +1727,163 @@ class TestStage1ReviewQueueCorrections:
         assert len(sub_cards) == 3
 
 
+class TestStage2ReviewQueueUIInvariants:
+    """
+    Stage 2 UI Invariant Tests:
+    1. No approve button is rendered for L4 evidence.
+    2. The unverified label ('not counted as paid') is present.
+    3. The differing-amount step is explicit, requiring two-step confirmation.
+    4. Progress counter ('Match X of Y'), 'Why we think so', and side-by-side comparison.
+    """
+
+    def test_stage2_ui_invariant_no_approve_button_rendered_for_l4(
+        self, client: TestClient, db_session: Session, demo_tenant_and_owner: tuple[Tenant, User]
+    ):
+        import re
+        demo_t, demo_u = demo_tenant_and_owner
+        authenticate_client(client, db_session, demo_u)
+
+        res = client.get("/")
+        assert res.status_code == 200
+
+        # Find L4 payment line in DB
+        pl_l4 = db_session.execute(
+            select(PaymentLine)
+            .where(
+                PaymentLine.tenant_id == demo_t.id,
+                PaymentLine.evidence_level == "L4",
+                PaymentLine.state == "proposed",
+            )
+        ).scalars().first()
+        assert pl_l4 is not None
+
+        pm_l4 = db_session.execute(
+            select(PaymentMatch)
+            .where(
+                PaymentMatch.tenant_id == demo_t.id,
+                PaymentMatch.payment_line_id == pl_l4.id,
+            )
+        ).scalars().first()
+        card_id = pm_l4.id if pm_l4 else pl_l4.id
+
+        # Extract the L4 card HTML block
+        card_pattern = rf'(<div[^>]+id=["\']match-card-{card_id}["\'].*?)(?=<div[^>]+class=["\']match-card["\']|</div>\s*</div>\s*<!-- Reversal|<script)'
+        m_card = re.search(card_pattern, res.text, re.DOTALL)
+        assert m_card is not None, f"L4 card for payment {pl_l4.id} not found"
+        l4_html = m_card.group(1)
+
+        # Invariant 1: No approve button or approve form is rendered for L4
+        assert "/approve" not in l4_html
+        assert "data-testid=\"confirm-match-button\"" not in l4_html
+        assert "data-testid='confirm-match-button'" not in l4_html
+        assert "data-testid=\"confirm-differing-button\"" not in l4_html
+        assert "data-testid='confirm-differing-button'" not in l4_html
+
+    def test_stage2_ui_invariant_unverified_label_present_for_l4(
+        self, client: TestClient, db_session: Session, demo_tenant_and_owner: tuple[Tenant, User]
+    ):
+        import re
+        demo_t, demo_u = demo_tenant_and_owner
+        authenticate_client(client, db_session, demo_u)
+
+        res = client.get("/")
+        assert res.status_code == 200
+
+        pl_l4 = db_session.execute(
+            select(PaymentLine)
+            .where(
+                PaymentLine.tenant_id == demo_t.id,
+                PaymentLine.evidence_level == "L4",
+                PaymentLine.state == "proposed",
+            )
+        ).scalars().first()
+        assert pl_l4 is not None
+
+        pm_l4 = db_session.execute(
+            select(PaymentMatch)
+            .where(
+                PaymentMatch.tenant_id == demo_t.id,
+                PaymentMatch.payment_line_id == pl_l4.id,
+            )
+        ).scalars().first()
+        card_id = pm_l4.id if pm_l4 else pl_l4.id
+
+        card_pattern = rf'(<div[^>]+id=["\']match-card-{card_id}["\'].*?)(?=<div[^>]+class=["\']match-card["\']|</div>\s*</div>\s*<!-- Reversal|<script)'
+        m_card = re.search(card_pattern, res.text, re.DOTALL)
+        assert m_card is not None
+        l4_html = m_card.group(1)
+
+        # Invariant 2: Unverified button and clear 'not counted as paid' label are present
+        assert "data-testid=\"mark-unverified-button\"" in l4_html or "data-testid='mark-unverified-button'" in l4_html
+        assert "not counted as paid" in l4_html.lower() or "እንደተከፈለ አይቆጠርም" in l4_html
+        assert "Unverified receipt photo / screenshot" in l4_html or "ያልተረጋገጠ የደረሰኝ ፎቶ" in l4_html
+
+    def test_stage2_ui_invariant_differing_amount_step_is_explicit(
+        self, client: TestClient, db_session: Session, demo_tenant_and_owner: tuple[Tenant, User]
+    ):
+        import re
+        demo_t, demo_u = demo_tenant_and_owner
+        authenticate_client(client, db_session, demo_u)
+
+        res = client.get("/")
+        assert res.status_code == 200
+
+        # Find Tewodros differing match (55,000 ETB vs 40,000 ETB)
+        pm_tewodros = db_session.execute(
+            select(PaymentMatch)
+            .join(PaymentLine, PaymentMatch.payment_line_id == PaymentLine.id)
+            .where(
+                PaymentMatch.tenant_id == demo_t.id,
+                PaymentLine.amount_santim == 5500000,
+            )
+        ).scalars().first()
+        assert pm_tewodros is not None
+
+        card_pattern = rf'(<div[^>]+id=["\']match-card-{pm_tewodros.id}["\'].*?)(?=<div[^>]+class=["\']match-card["\']|</div>\s*</div>\s*<!-- Reversal|<script)'
+        m_card = re.search(card_pattern, res.text, re.DOTALL)
+        assert m_card is not None
+        card_html = m_card.group(1)
+
+        # Invariant 3: Differing amount step is explicit
+        # Routine confirm must NOT be present
+        assert "data-testid=\"confirm-match-button\"" not in card_html
+        assert "data-testid='confirm-match-button'" not in card_html
+        # Differing confirm button MUST be present
+        assert "data-testid=\"confirm-differing-button\"" in card_html or "data-testid='confirm-differing-button'" in card_html
+        assert "name=\"confirm_differing\" value=\"true\"" in card_html or "name='confirm_differing' value='true'" in card_html
+        # Explicit confirmation prompt text must restate amounts and retailer
+        assert "Confirm and keep 15,000.00 ETB as credit" in card_html
+        assert "Tewodros Cosmetics" in card_html
+        assert pm_tewodros.invoice.invoice_number in card_html
+        # Difference in plain words
+        assert "Customer paid 55,000.00 ETB" in card_html
+        assert "Invoice is 40,000.00 ETB" in card_html
+        assert "Difference 15,000.00 ETB" in card_html
+
+    def test_stage2_ui_invariant_progress_counter_and_why_it_matched(
+        self, client: TestClient, db_session: Session, demo_tenant_and_owner: tuple[Tenant, User]
+    ):
+        import re
+        demo_t, demo_u = demo_tenant_and_owner
+        authenticate_client(client, db_session, demo_u)
+
+        res = client.get("/")
+        assert res.status_code == 200
+
+        # Invariant 4: Progress counter, side-by-side comparison, and Why we think so
+        assert "Match 1 of 6" in res.text
+        assert "Why it matched (Why we think so):" in res.text
+        assert "Suggested match, please check:" in res.text
+        # No raw internal tier jargon exposed in review queue
+        assert "Tier A match" not in res.text
+        assert "Tier B match" not in res.text
+        assert "Tier C match" not in res.text
+        # Comparison structure present
+        assert "match-comparison-grid" in res.text
+        assert "Payment Received" in res.text
+        assert "Invoice to Match" in res.text
+        # Skip action present
+        assert "Skip for Now" in res.text
+
+
+

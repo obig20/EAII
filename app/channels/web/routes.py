@@ -709,15 +709,15 @@ def dashboard(
             ret_display = target_inv.retailer.name if target_inv.retailer else "Unknown"
             if pm.tier == "tier_a":
                 if is_differing:
-                    reason = f"Tier A reference match: invoice '{target_inv.invoice_number}' referenced with {match_kind} amount"
+                    reason = f"Suggested match, please check: invoice '{target_inv.invoice_number}' referenced with {match_kind} amount"
                 else:
-                    reason = f"Tier A exact match: invoice number '{target_inv.invoice_number}' matched in payment reference with equal amount"
+                    reason = f"Suggested match, please check: invoice number '{target_inv.invoice_number}' referenced in payment line with exact amount match"
             elif pm.tier == "tier_b":
-                reason = f"Tier B match: counterparty phone/account or invoice token matched for retailer '{ret_display}' within date window"
+                reason = f"Suggested match, please check: counterparty account/phone matched for retailer '{ret_display}'"
             else:
-                reason = f"Tier C match: candidate open invoice for retailer '{ret_display}' based on name normalization and amount similarity"
+                reason = f"Suggested match, please check: candidate open invoice for retailer '{ret_display}' based on name and amount similarity"
         elif pl.state == "proposed":
-            reason = "Awaiting verification against open invoices"
+            reason = "Suggested match, please check: unverified payment awaiting review against open invoices"
 
         proposed_items.append({
             "payment_id": str(pl.id),

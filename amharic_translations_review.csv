@@ -1,33 +1,51 @@
 English String,Amharic Translation (needs native review),Context / Screen,Status
-"Daily Close","ዕለታዊ ሂሳብ ማጠቃለያ","Brand Header","needs native review"
-"Sign In to Your Business Account","ወደ ንግድ መለያዎ ይግቡ","Login Screen","needs native review"
-"Email or Phone (+251...)","ኢሜይል ወይም ስልክ (+251...)","Login Screen","needs native review"
-"Password","የይለፍ ቃል","Login Screen","needs native review"
-"Show Password","የይለፍ ቃል አሳይ","Login Screen","needs native review"
-"Sign In","ግባ","Login Screen","needs native review"
-"Forgot your password? Ask your business owner.","የይለፍ ቃልዎን ረሱ? የንግድዎን ባለቤት ይጠይቁ።","Login Screen","needs native review"
-"Total Unpaid","ያልተከፈለ አጠቃላይ","Dashboard KPI","needs native review"
-"Overdue","ቀኑ ያለፈበት","Dashboard KPI","needs native review"
-"Pending Matches","ያልተረጋገጡ ክፍያዎች","Dashboard KPI","needs native review"
-"Today's Reconciliation Tasks","የዛሬው የሂሳብ ማጠቃለያ ስራዎች","Dashboard Checklist","needs native review"
-"Record Today's Credit Sales","የዛሬውን የብድር ሽያጭ ይመዝግቡ","Dashboard Task 1","needs native review"
-"Upload Bank / Wallet Statement","የባንክ ወይም የቴሌብር መግለጫ ያስገቡ","Dashboard Task 2","needs native review"
-"Review Pending Payments","የቀረቡ ክፍያዎችን ይገምግሙ","Dashboard Task 3","needs native review"
-"All daily close tasks are complete for today. Debtor ledgers are up to date.","የዛሬው የዕለታዊ ሂሳብ ማጠቃለያ ስራዎች በሙሉ ተጠናቀዋል። የደንበኞች ቀሪ ሂሳብ ተስተካክሏል።","Dashboard Empty State","needs native review"
-"Suggested match, please check","የቀረበ ማዛመጃ፤ እባክዎ ያረጋግጡ","Review Queue Card","needs native review"
-"Confirmed by payment provider","በክፍያ አቅራቢው የተረጋገጠ","Evidence Badge L1","needs native review"
-"Found on bank statement","በባንክ መግለጫ ላይ የተገኘ","Evidence Badge L2","needs native review"
-"Confirmed directly by customer","በደንበኛው በቀጥታ የተረጋገጠ","Evidence Badge L3","needs native review"
-"Unverified receipt photo / screenshot","ያልተረጋገጠ የደረሰኝ ፎቶ / ስክሪንሾት","Evidence Badge L4","needs native review"
-"Accept as unverified receipt (not counted as paid)","ያልተረጋገጠ ደረሰኝ ብሎ መመዝገብ (እንደተከፈለ አይቆጠርም)","Review Action L4","needs native review"
-"kept on file as credit, not applied to other invoices","እንደተቀማጭ ክሬዲት ይቀመጣል፤ ለሌላ ደረሰኝ አይውልም","Overpayment Warning","needs native review"
-"Confirm differing match","ልዩነት ያለውን ክፍያ ያጽድቁ","Review Action Differing","needs native review"
-"Confirm and keep {amount} ETB as credit","አጽድቅ እና {amount} ብር እንደ ክሬዲት አስቀምጥ","Confirm Dialog","needs native review"
-"Other possible invoices for this customer or others","ለዚህ ወይም ለሌላ ደንበኛ ያሉ ሌሎች ክፍት ደረሰኞች","Alternative Invoices","needs native review"
-"Previously reversed match (review needed)","ከዚህ በፊት የተሰረዘ ማዛመጃ (ግምገማ ያስፈልገዋል)","Review Queue Badge","needs native review"
-"Confirming this balance does not record any payment","ይህንን ቀሪ ሂሳብ ማረጋገጥ ክፍያን አይመዘግብም","Retailer Portal","needs native review"
-"Daily Close will never ask for money or passwords","ዕለታዊ ሂሳብ ማጠቃለያ መቼም ገንዘብ ወይም የይለፍ ቃል አይጠይቅም","Retailer Portal","needs native review"
-"Payment match confirmed and customer balance updated.","የክፍያ ማዛመጃው ጸድቋል፤ የደንበኛው ቀሪ ሂሳብ ተስተካክሏል።","Toast Success","needs native review"
-"Match rejected.","ማዛመጃው ውድቅ ተደርጓል።","Toast Rejected","needs native review"
-"Action undone. Payment returned to review queue.","እርምጃው ተመልሷል። ክፍያው ወደ ግምገማ ዝርዝር ተመልሷል።","Toast Undone","needs native review"
-"Connection interrupted. Please check your data and retry.","የግንኙነት መቆራረጥ አጋጥሟል። እባክዎ ኢንተርኔትዎን አረጋግጠው እንደገና ይሞክሩ።","Toast Error","needs native review"
+,{% if lang == 'am' %}የብድር ዕድሜ ሪፖርት,aging_table.html,needs native review
+,ከ{{ report.as_of_date.strftime('%d/%m/%Y') }} ጀምሮ · የተረጋገጡ ክፍያዎች ብቻ ሂሳብን ይቀንሳሉ,aging_table.html,needs native review
+,{% if lang == 'am' %}አጠቃላይ ያልተከፈለ ቀሪ ሂሳብ,confirm_balance.html,needs native review
+,{% if lang == 'am' %}የቀሪ ሂሳብ ማረጋገጫ መግለጫ,confirm_balance.html,needs native review
+,{% if lang == 'am' %}የክፍት ደረሰኞች ዝርዝር,confirm_balance.html,needs native review
+,{% if lang == 'am' %}ቀኑ ያለፈበት,dashboard.html,needs native review
+,{% if lang == 'am' %}በቅርብ የተረጋገጡ ክፍያዎች (መመለሻ),dashboard.html,needs native review
+,{% if lang == 'am' %}የቀረቡ ክፍያዎችን ይገምግሙ,dashboard.html,needs native review
+,{% if lang == 'am' %}የባንክ ወይም የቴሌብር መግለጫ ያስገቡ,dashboard.html,needs native review
+,{% if lang == 'am' %}የዛሬው የሂሳብ ማጠቃለያ ስራዎች,dashboard.html,needs native review
+,{% if lang == 'am' %}የዛሬውን የብድር ሽያጭ ይመዝግቡ,dashboard.html,needs native review
+,{% if lang == 'am' %}ያልተረጋገጡ ክፍያዎች,dashboard.html,needs native review
+,{% if lang == 'am' %}ያልተከፈለ አጠቃላይ,dashboard.html,needs native review
+,የዛሬው የዕለታዊ ሂሳብ ማጠቃለያ ስራዎች በሙሉ ተጠናቀዋል።,dashboard.html,needs native review
+,{% if lang == 'am' %}አሳይ,login.html,needs native review
+,{% if lang == 'am' %}ኢሜይል ወይም ስልክ (+251...),login.html,needs native review
+,{% if lang == 'am' %}የይለፍ ቃል,login.html,needs native review
+,{% if lang == 'am' %}ግባ →,login.html,needs native review
+,ወደ አማርኛ ቀይር,login.html,needs native review
+,ዕለታዊ ሂሳብ ማጠቃለያ · ደህንነቱ የተጠበቀ መግቢያ,login.html,needs native review
+Forgot your password? Ask your business owner.,የይለፍ ቃልዎን ረሱ? የንግድዎን ባለቤት ይጠይቁ።,login.html,needs native review
+,({% if lang == 'am' %}እንደተቀማጭ ክሬዲት ይቀመጣል፤ ለሌላ ደረሰኝ አይውልም,review_queue.html,needs native review
+,{% if lang == 'am' %}ለጊዜው ይለፉ ↓,review_queue.html,needs native review
+,{% if lang == 'am' %}ማዛመጃ {{ loop.index }} ከ {{ proposed_items|length }},review_queue.html,needs native review
+,{% if lang == 'am' %}ቀጣይ,review_queue.html,needs native review
+,{% if lang == 'am' %}በባንክ መግለጫ ላይ የተገኘ,review_queue.html,needs native review
+,{% if lang == 'am' %}በክፍያ አቅራቢው የተረጋገጠ,review_queue.html,needs native review
+,{% if lang == 'am' %}በደንበኛው ማረጋገጫ ላይ የተመሰረተ,review_queue.html,needs native review
+,{% if lang == 'am' %}በደንበኛው በቀጥታ የተረጋገጠ,review_queue.html,needs native review
+,{% if lang == 'am' %}አትቀበል (ይህ አይደለም),review_queue.html,needs native review
+,{% if lang == 'am' %}ከዚህ በፊት የተሰረዘ ማዛመጃ,review_queue.html,needs native review
+,{% if lang == 'am' %}ክፍያ አረጋግጥ,review_queue.html,needs native review
+,{% if lang == 'am' %}የሚዛመድ ክፍት ደረሰኝ,review_queue.html,needs native review
+,{% if lang == 'am' %}የሚገመገሙ ክፍያዎች,review_queue.html,needs native review
+,{% if lang == 'am' %}የቅርብ ጊዜ ማዛመጃዎችን ይመልከቱ ↓,review_queue.html,needs native review
+,{% if lang == 'am' %}የተከፈለ ክፍያ,review_queue.html,needs native review
+,{% if lang == 'am' %}የክፍያ ማዛመጃዎች ግምገማ,review_queue.html,needs native review
+,{% if lang == 'am' %}ያልተረጋገጠ ብሎ መዝግብ (እንደተከፈለ አይቆጠርም),review_queue.html,needs native review
+,{% if lang == 'am' %}ያልተረጋገጠ የደረሰኝ ፎቶ / ስክሪንሾት (እንደተከፈለ አይቆጠርም),review_queue.html,needs native review
+,{% if lang == 'am' %}ይህ የተመረጠበት ምክንያት (ለምን አሰብን?)፡,review_queue.html,needs native review
+,ሁሉም የገቡ ክፍያዎች ተዛምደዋል ወይም ተረጋግጠዋል።,review_queue.html,needs native review
+,ሌሎች ክፍት ደረሰኞች ({{ item.alternative_candidates|length }}),review_queue.html,needs native review
+,ምንም የሚገመገም ክፍያ የለም!,review_queue.html,needs native review
+,ቀደም ሲል የተረጋገጠ ማዛመጃ መሰረዝ ይፈልጋሉ?,review_queue.html,needs native review
+,የባለቤት ብቻ ግምገማ። እባክዎ የቀረቡትን ክፍያዎች አንድ በአንድ ያረጋግጡ።,review_queue.html,needs native review
+,ደንበኛው {{ item.amount_etb }} ከፍሏል። የደረሰኝ ሂሳብ {{ item.invoice_amount_etb }} ነው። ልዩነቱ {{ item.diff_etb }} (በከፊል የተከፈለ፤ ቀሪው ደረሰኝ ላይ ይቆያል)።,review_queue.html,needs native review
+,ደንበኛው {{ item.amount_etb }} ከፍሏል። የደረሰኝ ሂሳብ {{ item.invoice_amount_etb }} ነው። ልዩነቱ {{ item.diff_etb }} (ትርፍ ክፍያ {{ item.unallocated_credit_etb }} እንደተቀማጭ ክሬዲት ይቀመጣል፤ ለሌላ ደረሰኝ አይውልም)።,review_queue.html,needs native review
+,ደንበኛው {{ item.amount_etb }} ከፍሏል። የደረሰኝ ሂሳብ {{ item.invoice_amount_etb }} ነው። ሙሉ በሙሉ ይዛመዳል — ምንም ልዩነት የለም።,review_queue.html,needs native review
+,← {% if lang == 'am' %}ቀዳሚ,review_queue.html,needs native review
+,🔒 {% if lang == 'am' %}የባለቤት ፍቃድ ያስፈልጋል,review_queue.html,needs native review
