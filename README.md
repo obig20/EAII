@@ -122,24 +122,89 @@ docker compose up -d
 # 4. Access the web dashboard at http://localhost:8000
 ```
 
-### Option B: Local Python Virtual Environment
+### Option B: Local Python Environment Setup (Step-by-Step for Fresh Machine)
+
+Follow these exact steps in order on a fresh host machine:
+
+#### Step 1: Create and Activate Virtual Environment
 ```bash
-# 1. Create and activate virtual environment
+# Linux / macOS
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Windows PowerShell
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\Activate.ps1
-
-# 2. Install dependencies
-pip install -r requirements/dev.txt
-
-# 3. Configure environment
-cp .env.example .env
-
-# 4. Run database migrations (connect as superuser)
-alembic upgrade head
-
-# 5. Launch FastAPI application
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+.venv\Scripts\Activate.ps1
 ```
+
+#### Step 2: Install Repository Dependencies
+Choose the appropriate requirements file:
+- `requirements/dev.txt`: Recommended for local development, demo runs, and full test suite execution (includes `pytest`, `httpx`, `coverage`, `factory-boy`).
+- `requirements/base.txt`: Core application dependencies only (`fastapi`, `uvicorn`, `sqlalchemy`, `alembic`, `psycopg`, `aiogram`, `argon2-cffi`, `defusedxml`).
+- `requirements/prod.txt`: Production server deployment dependencies.
+
+```bash
+pip install --upgrade pip
+pip install -r requirements/dev.txt
+```
+
+#### Step 3: Configure Environment Variables (`.env`)
+Copy the template configuration file:
+```bash
+cp .env.example .env
+```
+Open `.env` and configure the following parameters (replace placeholder values with your own secure keys; **never commit secrets to version control**):
+- `DATABASE_URL`: Application connection string for the unprivileged `app` role:
+  `postgresql+psycopg://app:your_app_password@localhost:5432/dailyclose_demo`
+- `DATABASE_MIGRATION_URL`: Migration connection string for the PostgreSQL superuser:
+  `postgresql+psycopg://postgres:your_superuser_password@localhost:5432/dailyclose_demo`
+- `SECRET_KEY`: 64-character random hex string for signing session tokens and approval tokens. Generate using:
+  `python -c "import secrets; print(secrets.token_hex(32))"`
+- `APP_ENV`: Set to `development` for local demo and feature testing (or `production` for strict production safeguards).
+- `LOG_LEVEL`: Set to `INFO` (Rule 9: never set to `DEBUG` in production to prevent PII leakage).
+
+#### Step 4: Provision PostgreSQL Databases & Roles
+Connect to PostgreSQL as `postgres` superuser (using `psql` or pgAdmin):
+
+```sql
+-- 1. Create the unprivileged application role
+CREATE ROLE app WITH LOGIN PASSWORD 'your_app_password';
+
+-- 2. Create the demo database and the test database
+CREATE DATABASE dailyclose_demo OWNER postgres;
+CREATE DATABASE dailyclose_test OWNER postgres;
+
+-- 3. Grant connection privileges to the application role
+GRANT CONNECT ON DATABASE dailyclose_demo TO app;
+GRANT CONNECT ON DATABASE dailyclose_test TO app;
+```
+
+> [!NOTE]
+> When Alembic runs under the superuser connection (`DATABASE_MIGRATION_URL`), migration `0001_initial.py` automatically grants `SELECT, INSERT, UPDATE, DELETE` on all public tables to `app`, `USAGE, SELECT` on sequences, enables and forces Row-Level Security (RLS), and revokes `UPDATE, DELETE` on the `events` table from `app` to enforce append-only audit immutability.
+
+#### Step 5: Run Database Migrations
+Apply the complete schema migrations up to head (`0006_stage2_demo_mode`):
+```bash
+alembic upgrade head
+```
+
+#### Step 6: Seed the Demo Wholesaler Tenant
+Seed a realistic Addis Ababa wholesale tenant with 12 retailers, 30 invoices, and 9 statement entries:
+```bash
+python -m app.cli create-demo
+```
+
+#### Step 7: Launch the Application Server
+```bash
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+> [!IMPORTANT]
+> **Host Binding:** Always use `--host 127.0.0.1` for local work. Use `--host 0.0.0.0` only on a trusted network. The demo login is public.
+
+#### Step 8: Log In to the Web Dashboard
+Open your browser to `http://127.0.0.1:8000/login` and log in:
+- **Identifier:** `demo@dailyclose.et`
+- **Password:** `DemoDailyClose2026!`
 
 ---
 
@@ -171,6 +236,9 @@ Simulating 30 retailers, 300 invoices, 400 payment lines across 10 noise pattern
 
 Daily Close includes a pre-packaged, realistic demo mode representing a Merkato/Sebategna wholesale distributor (12 retailers, 30 invoices, 9 statement payment lines).
 
+> [!WARNING]
+> **Do not run pytest while the demo database is configured as the test database.** Pytest executes automated table teardown and recreation cycles against `dailyclose_test`. Ensure your `.env` or settings explicitly separate `dailyclose_demo` (for running the demo) from `dailyclose_test` (for running test suites).
+
 ### 🚀 Start the demo in 3 commands
 
 Run these 3 commands from the repository root to launch the Addis Ababa wholesale demo:
@@ -183,10 +251,13 @@ alembic upgrade head
 python -m app.cli create-demo
 
 # 3. Launch the local web server
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Open your browser to **`http://localhost:8000/login`** and sign in:
+> [!IMPORTANT]
+> **Host Binding:** Always use `--host 127.0.0.1` for local work. Use `--host 0.0.0.0` only on a trusted network. The demo login is public.
+
+Open your browser to **`http://127.0.0.1:8000/login`** and sign in:
 - **Identifier:** `demo@dailyclose.et`
 - **Password:** `DemoDailyClose2026!`
 
@@ -194,7 +265,12 @@ Follow the complete 2-minute walkthrough guide in [`docs/demo_script.md`](docs/d
 
 ---
 
-### Database Provisioning & Isolation (Optional Dedicated DB)
+### Database Provisioning & Isolation
+
+Daily Close uses separated databases:
+- **Demo Database:** `dailyclose_demo`
+- **Test Database:** `dailyclose_test`
+
 ```bash
 # Create dedicated demo database in PostgreSQL
 createdb -h localhost -p 5432 -U postgres dailyclose_demo
@@ -203,11 +279,21 @@ createdb -h localhost -p 5432 -U postgres dailyclose_demo
 DATABASE_URL=postgresql://app:app_password@localhost:5432/dailyclose_demo alembic upgrade head
 ```
 
-### 2. Demo Tenant Creation & Baseline Population
-```bash
-DATABASE_URL=postgresql://app:app_password@localhost:5432/dailyclose_demo \
-python -m app.cli create-demo
-```
+### Reset and Re-seed Commands
+
+To reset or re-seed the wholesale demo:
+
+1. **Reset an existing demo tenant back to baseline:**
+   ```bash
+   python -m app.cli reset-demo --tenant-id <tenant_id>
+   ```
+   *(Alternatively, owners can click the "Reset Demo Data" button in the web dashboard notification banner).*
+
+2. **Re-seed a fresh demo tenant from scratch:**
+   ```bash
+   python -m app.cli create-demo
+   ```
+
 This populates:
 - **Tenant:** Addis Wholesale Demo / አዲስ ጅምላ ማሳያ (`is_demo=True`)
 - **Owner Account:** Ato Demo Owner (`demo@dailyclose.et` / `+251911999901`) with password `DemoDailyClose2026!`
@@ -216,7 +302,7 @@ This populates:
 - **30 Invoices:** Spread across all 5 AR aging buckets (Current, 1-30, 31-60, 61-90, 90+ days overdue).
 - **9 Bank/Telebirr Lines:** Demonstrating Tier A auto-confirmation, Tier B review queue, Tier C fuzzy match, partial payment with warning, overpayment with unallocated credit, and L4 unverified receipts.
 
-### 3. Production Safety Guard
+### Production Safety Guard
 > [!IMPORTANT]
 > **Production Guard:** `create-demo`, `reset-demo`, and hardcoded demo passwords refuse to run whenever `APP_ENV=production` (`RuntimeError` or `PermissionError`). Demo data can never be seeded into or wiped from a production tenant.
 

@@ -49,10 +49,12 @@ Thumbs.db
 *.log
 logs/
 
-# Backups and age encryption keys / files
+# Backups, SQL dumps, and age encryption keys / files
 backups/
 *.age
 *.age.pub
+*.sql
+!docker/initdb/01_setup.sql
 
 # Generated reports & outputs
 report.html

@@ -21,10 +21,10 @@ class Settings(BaseSettings):
     )
 
     # Database — app role (limited permissions, RLS applied)
-    database_url: str = "postgresql+psycopg://app@localhost:5432/dailyclose_test"
+    database_url: str = "postgresql+psycopg://app@localhost:5432/dailyclose_demo"
 
     # Database — superuser (used only by Alembic, not by the running app)
-    database_migration_url: str = "postgresql+psycopg://postgres@localhost:5432/dailyclose_test"
+    database_migration_url: str = "postgresql+psycopg://postgres@localhost:5432/dailyclose_demo"
 
     # Secret key for signing tokens (min 32 chars)
     secret_key: str = "development-only-secret-key-32-chars-minimum!"
