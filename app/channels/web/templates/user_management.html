@@ -125,12 +125,16 @@
           </td>
           <td class="px-6 py-4 text-right space-x-2">
             {% if u.id != current_user_id %}
+            {% if is_demo %}
+            <span class="text-xs text-slate-400 italic" title="Staff password reset is disabled in demo mode">Reset disabled in demo</span>
+            {% else %}
             <form method="POST" action="/settings/users/{{ u.id }}/reset-password" class="inline-block" data-confirm-action="reset-link" data-display-name="{{ u.display_name|e }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <button type="submit" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium underline">
                 Reset Password
               </button>
             </form>
+            {% endif %}
 
             {% if u.is_active %}
             <form method="POST" action="/settings/users/{{ u.id }}/deactivate" class="inline-block" data-confirm-action="deactivate-user" data-display-name="{{ u.display_name|e }}">

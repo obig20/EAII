@@ -446,6 +446,8 @@ def list_users(
         name="user_management.html",
         context={
             "tenant_name": tenant.name,
+            "tenant": tenant,
+            "is_demo": getattr(tenant, "is_demo", False),
             "user_role": user.role,
             "users": users,
             "csrf_token": csrf_token,
@@ -546,6 +548,12 @@ def reset_staff_password(
     tenant, actor_user, _ = session_info
     if actor_user.role != UserRole.OWNER.value:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+
+    if getattr(tenant, "is_demo", False):
+        return RedirectResponse(
+            f"/settings/users?msg={quote('Password reset is disabled in demo mode.')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     try:
         uid = uuid.UUID(user_id)

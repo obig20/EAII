@@ -211,6 +211,35 @@ class TestStage2SecurityHardening:
         assert res_expired.status_code == 400
         assert "expired" in res_expired.text.lower()
 
+    def test_password_reset_disabled_in_demo_mode(
+        self, client: TestClient, db_session: Session, demo_tenant_and_owner: tuple[Tenant, User]
+    ):
+        """Verify that on demo tenants, staff password reset is disabled with a clear message."""
+        demo_t, demo_u = demo_tenant_and_owner
+        cashier = User(
+            id=uuid.uuid4(),
+            tenant_id=demo_t.id,
+            role=UserRole.CASHIER.value,
+            display_name="Demo Cashier",
+            email="demo.cashier@dailyclose.et",
+            phone="+251911999902",
+            password_hash="dummy",
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(cashier)
+        db_session.flush()
+
+        authenticate_client(client, db_session, demo_u)
+        res = client.get("/settings/users")
+        assert res.status_code == 200
+        assert "Reset disabled in demo" in res.text
+
+        res_post = client.post(f"/settings/users/{cashier.id}/reset-password", follow_redirects=False)
+        assert res_post.status_code == 303
+        loc = res_post.headers.get("location", "")
+        assert "Password reset is disabled in demo mode" in urllib.parse.unquote(loc)
+
     def test_set_lang_route(self, client: TestClient):
         """
         Test /set-lang/{lang_code}:
