@@ -171,9 +171,30 @@ Simulating 30 retailers, 300 invoices, 400 payment lines across 10 noise pattern
 
 Daily Close includes a pre-packaged, realistic demo mode representing a Merkato/Sebategna wholesale distributor (12 retailers, 30 invoices, 9 statement payment lines).
 
-To guarantee strict isolation and eliminate any risk of accidental contamination or data loss in production/development databases, demo operations should run against a dedicated PostgreSQL database named **`dailyclose_demo`**.
+### 🚀 Start the demo in 3 commands
 
-### 1. Database Provisioning & Migration
+Run these 3 commands from the repository root to launch the Addis Ababa wholesale demo:
+
+```bash
+# 1. Apply database migrations
+alembic upgrade head
+
+# 2. Seed realistic Addis Ababa wholesale demo tenant
+python -m app.cli create-demo
+
+# 3. Launch the local web server
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Open your browser to **`http://localhost:8000/login`** and sign in:
+- **Identifier:** `demo@dailyclose.et`
+- **Password:** `DemoDailyClose2026!`
+
+Follow the complete 2-minute walkthrough guide in [`docs/demo_script.md`](docs/demo_script.md).
+
+---
+
+### Database Provisioning & Isolation (Optional Dedicated DB)
 ```bash
 # Create dedicated demo database in PostgreSQL
 createdb -h localhost -p 5432 -U postgres dailyclose_demo
@@ -189,7 +210,7 @@ python -m app.cli create-demo
 ```
 This populates:
 - **Tenant:** Addis Wholesale Demo / አዲስ ጅምላ ማሳያ (`is_demo=True`)
-- **Owner Account:** Ato Demo Owner (`demo.owner@dailyclose.et` / `+251911999901`) with password `DemoOwner123!`
+- **Owner Account:** Ato Demo Owner (`demo@dailyclose.et` / `+251911999901`) with password `DemoDailyClose2026!`
 - **Cashier Account:** W/ro Demo Cashier (`demo.cashier@dailyclose.et` / `+251922999902`) with password `DemoCashier123!`
 - **12 Retailers:** Merkato, Piassa, Bole, Mexico, etc.
 - **30 Invoices:** Spread across all 5 AR aging buckets (Current, 1-30, 31-60, 61-90, 90+ days overdue).

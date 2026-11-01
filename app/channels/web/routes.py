@@ -1454,12 +1454,14 @@ def reverse_match(
         raise HTTPException(status_code=400, detail="Invalid match ID")
 
     # Validate reason code
+    code = reason_code.strip().lower()
     valid_codes = [c.value for c in ReversalReasonCode]
-    if reason_code not in valid_codes:
+    if code not in valid_codes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid reversal reason code '{reason_code}'. Must be one of: {valid_codes}",
         )
+    reason_code = code
 
     # 1. Lock PaymentMatch in consistent order
     pm = session.execute(

@@ -291,7 +291,7 @@
           {% if user_role == 'owner' %}
           <form method="POST" action="/matches/{{ rc.match_id }}/reverse" data-confirm="reverse-match">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="reason_code" value="WRONG_INVOICE">
+            <input type="hidden" name="reason_code" value="wrong_invoice">
             <button type="submit" class="btn btn-secondary" style="min-height: 36px; padding: 0.25rem 0.75rem; font-size: 0.75rem; color: var(--color-danger); border-color: var(--color-danger-border);">
               <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle;"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg> Reverse Match
             </button>
