@@ -151,3 +151,80 @@ def verify_telegram_match_token(secret: str, match_id: uuid.UUID | str, token: s
     """Verify compact 8-character HMAC signature."""
     expected = generate_telegram_match_token(secret, match_id)
     return hmac.compare_digest(expected, token)
+
+
+PASSWORD_RESET_MAX_AGE_SECONDS = 86400  # 24 hours lifetime
+
+
+def generate_password_reset_token(
+    secret: str,
+    *,
+    tenant_id: uuid.UUID | str,
+    user_id: uuid.UUID | str,
+    nonce: str | None = None,
+    issued_at: int | None = None,
+) -> str:
+    """
+    Generate a cryptographically signed single-use password reset token.
+    Valid for 24 hours. Binds tenant ID, user ID, unique nonce, and timestamp.
+    """
+    ts = issued_at if issued_at is not None else int(time.time())
+    n = nonce if nonce is not None else uuid.uuid4().hex[:16]
+    payload = f"{tenant_id}:{user_id}:{n}:{ts}"
+    sig = hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{payload}:{sig}"
+
+
+def verify_password_reset_token(
+    secret: str,
+    token: str,
+    *,
+    expected_tenant_id: uuid.UUID | str | None = None,
+    current_time: int | None = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """
+    Verify HMAC signature, scope, and 24-hour expiration of password reset token.
+    Returns (is_valid, error_message, token_data_dict).
+    """
+    if not token or not isinstance(token, str):
+        return False, "Password reset token is missing or invalid.", {}
+
+    parts = token.strip().split(":")
+    if len(parts) != 5:
+        return False, "Malformed password reset token structure.", {}
+
+    token_tid, token_uid, token_nonce, token_ts, token_sig = parts
+
+    # 1. Constant-time signature verification
+    reconstructed_payload = f"{token_tid}:{token_uid}:{token_nonce}:{token_ts}"
+    expected_sig = hmac.new(
+        secret.encode("utf-8"), reconstructed_payload.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(expected_sig, token_sig):
+        return False, "Password reset token signature verification failed.", {}
+
+    # 2. Scope verification
+    if expected_tenant_id is not None and token_tid != str(expected_tenant_id):
+        return False, "Password reset token belongs to a different tenant.", {}
+
+    # 3. 24-hour expiration check
+    try:
+        ts_int = int(token_ts)
+    except ValueError:
+        return False, "Invalid token timestamp.", {}
+
+    now = current_time if current_time is not None else int(time.time())
+    if now - ts_int > PASSWORD_RESET_MAX_AGE_SECONDS:
+        return False, "Password reset link has expired (24-hour limit).", {}
+    if ts_int > now + 60:
+        return False, "Token timestamp is in the future.", {}
+
+    data = {
+        "tenant_id": uuid.UUID(token_tid),
+        "user_id": uuid.UUID(token_uid),
+        "nonce": token_nonce,
+        "issued_at": ts_int,
+        "token_sig": token_sig,
+    }
+    return True, "Valid", data
+

@@ -100,7 +100,7 @@
       
       <!-- TASK 1: Record Credit Sales -->
       <div class="task-card {% if today_sales_count > 0 %}complete{% else %}pending{% endif %}"
-           onclick="document.getElementById('drawer-sales').style.display = document.getElementById('drawer-sales').style.display === 'none' ? 'block' : 'none';"
+           data-action="toggle-drawer" data-target="drawer-sales"
            style="cursor: pointer;">
         <div style="display: flex; align-items: center;">
           <div class="task-number">1</div>
@@ -129,7 +129,7 @@
           <h3 style="font-size: 0.9375rem; font-weight: 800;">
             {% if lang == 'am' %}አዲስ የብድር ሽያጭ መመዝገቢያ{% else %}Record Single Credit Sale{% endif %}
           </h3>
-          <button type="button" onclick="document.getElementById('drawer-sales').style.display = 'none';" style="background: transparent; border: none; font-size: 1.25rem; cursor: pointer; color: var(--color-text-muted);">&times;</button>
+          <button type="button" data-action="close-drawer" data-target="drawer-sales" style="background: transparent; border: none; font-size: 1.25rem; cursor: pointer; color: var(--color-text-muted);">&times;</button>
         </div>
 
         <form action="/sales" method="POST" id="sales-form">
@@ -182,7 +182,7 @@
 
       <!-- TASK 2: Upload Bank Statement -->
       <div class="task-card {% if today_batches_count > 0 %}complete{% else %}pending{% endif %}"
-           onclick="document.getElementById('drawer-statement').style.display = document.getElementById('drawer-statement').style.display === 'none' ? 'block' : 'none';"
+           data-action="toggle-drawer" data-target="drawer-statement"
            style="cursor: pointer;">
         <div style="display: flex; align-items: center;">
           <div class="task-number">2</div>
@@ -211,7 +211,7 @@
           <h3 style="font-size: 0.9375rem; font-weight: 800;">
             {% if lang == 'am' %}የባንክ / ቴሌብር መግለጫ ማስገቢያ{% else %}Import Today's Statement{% endif %}
           </h3>
-          <button type="button" onclick="document.getElementById('drawer-statement').style.display = 'none';" style="background: transparent; border: none; font-size: 1.25rem; cursor: pointer; color: var(--color-text-muted);">&times;</button>
+          <button type="button" data-action="close-drawer" data-target="drawer-statement" style="background: transparent; border: none; font-size: 1.25rem; cursor: pointer; color: var(--color-text-muted);">&times;</button>
         </div>
 
         <form action="/statements/upload" method="POST" enctype="multipart/form-data">
@@ -289,7 +289,7 @@
             </div>
           </div>
           {% if user_role == 'owner' %}
-          <form method="POST" action="/matches/{{ rc.match_id }}/reverse" onsubmit="return confirm('Are you sure you want to reverse this match? This will restore open balances and log an audit reversal event.');">
+          <form method="POST" action="/matches/{{ rc.match_id }}/reverse" data-confirm="reverse-match">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="reason_code" value="WRONG_INVOICE">
             <button type="submit" class="btn btn-secondary" style="min-height: 36px; padding: 0.25rem 0.75rem; font-size: 0.75rem; color: var(--color-danger); border-color: var(--color-danger-border);">

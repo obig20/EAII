@@ -33,10 +33,12 @@ def create_app() -> FastAPI:
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline'; "
+            "script-src 'self'; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; "
-            "connect-src 'self'; "
+            "object-src 'none'; "
+            "base-uri 'none'; "
+            "form-action 'self'; "
             "frame-ancestors 'none';"
         )
         return response

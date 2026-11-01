@@ -20,6 +20,23 @@
   </div>
   {% endif %}
 
+  {% if reset_link and target_name %}
+  <div class="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-sm" data-testid="reset-link-banner">
+    <div class="font-bold mb-1">
+      Single-Use 24-Hour Password Reset Link Generated for {{ target_name }}:
+    </div>
+    <div class="text-xs text-amber-800 mb-2">
+      Send this link to the staff member so they can securely set their own password. The business owner cannot see or choose their password.
+    </div>
+    <div class="flex items-center gap-2">
+      <input type="text" readonly id="reset-link-val" value="{{ reset_link }}" class="w-full text-xs font-mono bg-white border border-amber-300 rounded p-2 text-slate-800">
+      <button type="button" data-action="copy-link" data-target="reset-link-val" class="px-3 py-2 bg-amber-600 text-white rounded text-xs font-bold hover:bg-amber-700 whitespace-nowrap">
+        Copy Link
+      </button>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- User Creation Card -->
   <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
     <h2 class="text-sm font-bold text-slate-900 uppercase tracking-wider mb-4">Provision New User Account</h2>
@@ -108,18 +125,17 @@
           </td>
           <td class="px-6 py-4 text-right space-x-2">
             {% if u.id != current_user_id %}
-            <form method="POST" action="/settings/users/{{ u.id }}/reset-password" class="inline-block">
+            <form method="POST" action="/settings/users/{{ u.id }}/reset-password" class="inline-block" data-confirm-action="reset-link" data-display-name="{{ u.display_name|e }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <input type="hidden" name="new_password" value="BiranaTemp#2026!">
-              <button type="submit" onclick="return confirm('Reset password for {{ u.display_name }} to BiranaTemp#2026!?')" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium underline">
+              <button type="submit" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium underline">
                 Reset Password
               </button>
             </form>
 
             {% if u.is_active %}
-            <form method="POST" action="/settings/users/{{ u.id }}/deactivate" class="inline-block">
+            <form method="POST" action="/settings/users/{{ u.id }}/deactivate" class="inline-block" data-confirm-action="deactivate-user" data-display-name="{{ u.display_name|e }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button type="submit" onclick="return confirm('Deactivate account for {{ u.display_name }}?')" class="text-xs text-rose-600 hover:text-rose-800 font-medium underline">
+              <button type="submit" class="text-xs text-rose-600 hover:text-rose-800 font-medium underline">
                 Deactivate
               </button>
             </form>

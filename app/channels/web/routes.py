@@ -16,6 +16,7 @@ import zipfile
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlparse, quote
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
@@ -53,11 +54,17 @@ from app.kernel.db import get_session
 from app.kernel.enums import EvidenceLevel, InvoiceState, MatchState, PaymentState, ReversalReasonCode, UserRole
 from app.kernel.events import append_event
 from app.kernel.guards import InsufficientEvidenceError, assert_confirmable
-from app.kernel.models import ImportBatch, Invoice, PaymentLine, PaymentMatch, ProcessedApprovalToken, RateLimitBucket, Retailer, ReversalNote, Session as SessionModel, Tenant, User
+from app.kernel.models import Event, ImportBatch, Invoice, PaymentLine, PaymentMatch, ProcessedApprovalToken, RateLimitBucket, Retailer, ReversalNote, Session as SessionModel, Tenant, User
 from app.channels.telegram.i18n import t
 from app.kernel.money import format_money, to_etb
 from app.matching.context import compute_match_reconciliation_context
-from app.kernel.tokens import generate_match_approval_token, hash_approval_token, verify_match_approval_token
+from app.kernel.tokens import (
+    generate_match_approval_token,
+    generate_password_reset_token,
+    hash_approval_token,
+    verify_match_approval_token,
+    verify_password_reset_token,
+)
 from app.kernel.persistent_rate_limit import (
     RateLimitExceededError,
     check_persistent_rate_limit,
@@ -204,10 +211,29 @@ def login_page(request: Request, session: Session = Depends(get_session)):
 
 @router.get("/set-lang/{lang_code}")
 def set_language_endpoint(lang_code: str, request: Request):
-    code = "am" if lang_code.lower() == "am" else "en"
+    code = lang_code.lower()
+    if code not in ("en", "am"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid language code. Supported languages are 'en' and 'am'.",
+        )
     referer = request.headers.get("referer", "/dashboard")
-    response = RedirectResponse(url=referer, status_code=303)
-    response.set_cookie("lang", code, max_age=365*24*3600, path="/", samesite="lax")
+    target_url = "/dashboard"
+    if referer:
+        try:
+            parsed = urlparse(referer)
+            # Accept only local relative paths starting with '/' (and not '//')
+            if not parsed.netloc and parsed.path.startswith("/") and not parsed.path.startswith("//"):
+                target_url = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+            elif parsed.netloc:
+                req_parsed = urlparse(str(request.base_url))
+                if parsed.netloc == req_parsed.netloc and parsed.scheme == req_parsed.scheme:
+                    target_url = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+        except Exception:
+            target_url = "/dashboard"
+
+    response = RedirectResponse(url=target_url, status_code=status.HTTP_303_SEE_OTHER)
+    response.set_cookie(key="lang", value=code, max_age=365 * 24 * 3600, path="/", samesite="lax")
     return response
 
 
@@ -401,6 +427,8 @@ def list_users(
     session: Session = Depends(get_session),
     session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
     msg: str | None = Query(None),
+    reset_link: str | None = Query(None),
+    target_name: str | None = Query(None),
 ):
     """List staff accounts for current tenant."""
     tenant, user, session_rec = session_info
@@ -422,6 +450,10 @@ def list_users(
             "users": users,
             "csrf_token": csrf_token,
             "message": msg,
+            "reset_link": reset_link,
+            "target_name": target_name,
+            "current_user_id": user.id,
+            "lang": request.cookies.get("lang", "en"),
         },
     )
 
@@ -502,12 +534,15 @@ def create_staff_user(
 @router.post("/settings/users/{user_id}/reset-password")
 def reset_staff_password(
     user_id: str,
-    new_password: str = Form(...),
+    new_password: str | None = Form(None),
     session: Session = Depends(get_session),
     session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
     _csrf: None = Depends(verify_csrf),
 ):
-    """Owner reset of staff user password with immediate session revocation."""
+    """
+    Owner generation of single-use 24-hour password reset link.
+    The owner never sees or chooses the password.
+    """
     tenant, actor_user, _ = session_info
     if actor_user.role != UserRole.OWNER.value:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
@@ -517,31 +552,154 @@ def reset_staff_password(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid user ID.")
 
-    if len(new_password) < 10:
-        raise HTTPException(status_code=400, detail="New password must be at least 10 characters long.")
-
     set_tenant(session, tenant.id)
     target_user = session.get(User, uid)
     if not target_user or target_user.tenant_id != tenant.id:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    target_user.password_hash = hash_password(new_password)
-    target_user.failed_login_attempts = 0
-    target_user.locked_until = None
-    terminate_all_user_sessions(session, user_id=target_user.id)
+    token = generate_password_reset_token(
+        settings.secret_key,
+        tenant_id=tenant.id,
+        user_id=target_user.id,
+    )
+    reset_link = f"/reset-password/{token}"
 
     append_event(
         session,
         tenant_id=tenant.id,
-        event_type="auth.password_reset",
+        event_type="auth.password_reset_link_generated",
         aggregate_type="user",
         aggregate_id=target_user.id,
         actor_id=actor_user.id,
-        payload={},
+        payload={"expires_in_hours": 24},
     )
     session.commit()
 
-    return RedirectResponse("/settings/users?msg=Password+reset+successfully", status_code=status.HTTP_303_SEE_OTHER)
+    encoded_link = quote(reset_link)
+    encoded_name = quote(target_user.display_name)
+    return RedirectResponse(
+        f"/settings/users?reset_link={encoded_link}&target_name={encoded_name}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.get("/reset-password/{token}", response_class=HTMLResponse)
+def show_reset_password_page(token: str, request: Request, session: Session = Depends(get_session)):
+    """Render single-use password reset page for staff member."""
+    is_valid, err_msg, data = verify_password_reset_token(settings.secret_key, token)
+    if not is_valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_msg)
+
+    token_sig = data.get("token_sig")
+    existing_event = session.execute(
+        select(Event).where(
+            Event.tenant_id == data["tenant_id"],
+            Event.event_type == "auth.password_reset_completed",
+            Event.payload["token_sig"].astext == token_sig,
+        )
+    ).scalars().first()
+    if existing_event:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This password reset link has already been used.")
+
+    user = session.get(User, data["user_id"])
+    if not user or not user.is_active or user.tenant_id != data["tenant_id"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User account not found or deactivated.")
+
+    lang = request.cookies.get("lang", "en")
+    csrf_token = generate_csrf_token(uuid.uuid4(), settings.secret_key)
+    return templates.TemplateResponse(
+        request=request,
+        name="reset_password.html",
+        context={
+            "token": token,
+            "display_name": user.display_name,
+            "csrf_token": csrf_token,
+            "lang": lang,
+            "error": None,
+        },
+    )
+
+
+@router.post("/reset-password/{token}")
+def submit_reset_password(
+    token: str,
+    request: Request,
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+    session: Session = Depends(get_session),
+):
+    """Process single-use password reset form submission."""
+    is_valid, err_msg, data = verify_password_reset_token(settings.secret_key, token)
+    if not is_valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_msg)
+
+    token_sig = data.get("token_sig")
+    token_nonce = data.get("nonce")
+    existing_event = session.execute(
+        select(Event).where(
+            Event.tenant_id == data["tenant_id"],
+            Event.event_type == "auth.password_reset_completed",
+            Event.payload["token_sig"].astext == token_sig,
+        )
+    ).scalars().first()
+    if existing_event:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This password reset link has already been used.")
+
+    user = session.get(User, data["user_id"])
+    if not user or not user.is_active or user.tenant_id != data["tenant_id"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User account not found or deactivated.")
+
+    lang = request.cookies.get("lang", "en")
+    csrf_token = generate_csrf_token(uuid.uuid4(), settings.secret_key)
+    if len(new_password) < 10:
+        return templates.TemplateResponse(
+            request=request,
+            name="reset_password.html",
+            context={
+                "token": token,
+                "display_name": user.display_name,
+                "csrf_token": csrf_token,
+                "lang": lang,
+                "error": "Password must be at least 10 characters long.",
+            },
+            status_code=400,
+        )
+
+    if new_password != confirm_password:
+        return templates.TemplateResponse(
+            request=request,
+            name="reset_password.html",
+            context={
+                "token": token,
+                "display_name": user.display_name,
+                "csrf_token": csrf_token,
+                "lang": lang,
+                "error": "Passwords do not match.",
+            },
+            status_code=400,
+        )
+
+    set_tenant(session, user.tenant_id)
+    user.password_hash = hash_password(new_password)
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    terminate_all_user_sessions(session, user_id=user.id)
+
+    append_event(
+        session,
+        tenant_id=user.tenant_id,
+        event_type="auth.password_reset_completed",
+        aggregate_type="user",
+        aggregate_id=user.id,
+        actor_id=user.id,
+        payload={"token_sig": token_sig, "token_nonce": token_nonce},
+    )
+    session.commit()
+
+    return RedirectResponse(
+        url="/login?msg=Password+reset+successful.+Please+sign+in+with+your+new+password.",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @router.post("/settings/users/{user_id}/deactivate")

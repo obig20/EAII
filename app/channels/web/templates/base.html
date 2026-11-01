@@ -5,8 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Daily Close — Birana Technology{% endblock %}</title>
   <!-- Local CSS and HTMX (No CDN, external fonts, scripts or analytics) -->
+  <meta name="htmx-config" content='{"allowEval":false,"includeIndicatorStyles":false}'>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/htmx.min.js"></script>
+  <script src="/static/app.js"></script>
 </head>
 <body class="{% if lang == 'am' %}amharic-text{% endif %}" hx-headers='{"x-csrf-token": "{{ csrf_token }}"}'>
 
@@ -108,56 +110,5 @@
       </div>
     </div>
   </footer>
-
-  <!-- Local Utilities Script -->
-  <script>
-    // Toast Notification Utility (≥ 10s visibility, aria-live, dismissible)
-    function showToast(message, type = 'success', undoCallback = null) {
-      const container = document.getElementById('toast-container');
-      if (!container) return;
-      
-      const toast = document.createElement('div');
-      toast.className = `toast ${type === 'danger' ? 'toast-danger' : 'toast-success'}`;
-      toast.setAttribute('role', 'status');
-      
-      let html = `<span>${message}</span>`;
-      if (undoCallback) {
-        html += `<button type="button" class="toast-undo-btn">Undo</button>`;
-      }
-      html += `<button type="button" class="toast-close-btn" aria-label="Dismiss">&times;</button>`;
-      toast.innerHTML = html;
-      
-      const closeBtn = toast.querySelector('.toast-close-btn');
-      closeBtn.addEventListener('click', () => toast.remove());
-      
-      if (undoCallback) {
-        const undoBtn = toast.querySelector('.toast-undo-btn');
-        undoBtn.addEventListener('click', () => {
-          undoCallback();
-          toast.remove();
-        });
-      }
-      
-      container.appendChild(toast);
-      // Visible for at least 10 seconds before auto-dismiss
-      setTimeout(() => {
-        if (toast.parentNode) toast.remove();
-      }, 10000);
-    }
-
-    // Password Toggle Helper
-    function togglePasswordVisibility(inputId, toggleBtnId) {
-      const input = document.getElementById(inputId);
-      const btn = document.getElementById(toggleBtnId);
-      if (!input || !btn) return;
-      if (input.type === 'password') {
-        input.type = 'text';
-        btn.textContent = 'Hide';
-      } else {
-        input.type = 'password';
-        btn.textContent = 'Show';
-      }
-    }
-  </script>
 </body>
 </html>

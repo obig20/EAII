@@ -28,7 +28,7 @@
         {% if lang == 'am' %}የሚገመገሙ ክፍያዎች <!-- needs native review -->{% else %}Pending Queue ({{ proposed_items|length }}){% endif %}
       </div>
       {% for nav_item in proposed_items %}
-      <div class="queue-nav-item {% if loop.first %}is-active{% endif %}" id="queue-nav-item-{{ nav_item.match_id or nav_item.payment_id }}" onclick="showMatchCardByIndex({{ loop.index0 }})">
+      <div class="queue-nav-item {% if loop.first %}is-active{% endif %}" id="queue-nav-item-{{ nav_item.match_id or nav_item.payment_id }}" data-action="show-card" data-index="{{ loop.index0 }}">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.2rem;">
           <strong style="color: var(--color-text-main);">{{ nav_item.retailer_name }}</strong>
           <span style="font-weight: 800; color: var(--color-primary); font-size: 0.8125rem;">{{ nav_item.amount_etb }}</span>
@@ -55,13 +55,13 @@
             {% if lang == 'am' %}ማዛመጃ {{ loop.index }} ከ {{ proposed_items|length }} <!-- needs native review -->{% else %}Match {{ loop.index }} of {{ proposed_items|length }}{% endif %}
           </span>
           <div style="display: flex; gap: 0.4rem; align-items: center;">
-            <button type="button" class="btn btn-secondary btn-sm" style="min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.75rem;" onclick="prevMatchCard()" title="Previous match">
+            <button type="button" class="btn btn-secondary btn-sm" style="min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.75rem;" data-action="prev-card" title="Previous match">
               ← {% if lang == 'am' %}ቀዳሚ <!-- needs native review -->{% else %}Prev{% endif %}
             </button>
-            <button type="button" class="btn btn-secondary btn-sm" style="min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.75rem;" onclick="nextMatchCard()" title="Next match">
+            <button type="button" class="btn btn-secondary btn-sm" style="min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.75rem;" data-action="next-card" title="Next match">
               {% if lang == 'am' %}ቀጣይ <!-- needs native review -->{% else %}Next{% endif %} →
             </button>
-            <button type="button" class="btn btn-secondary btn-sm" style="min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.75rem;" onclick="skipMatchCard('{{ item.match_id or item.payment_id }}')" title="Skip this match for now">
+            <button type="button" class="btn btn-secondary btn-sm" style="min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.75rem;" data-action="skip-card" data-card-id="{{ item.match_id or item.payment_id }}" title="Skip this match for now">
               {% if lang == 'am' %}ለጊዜው ይለፉ ↓ <!-- needs native review -->{% else %}Skip for Now ↓{% endif %}
             </button>
           </div>
@@ -246,7 +246,13 @@
                   hx-swap="outerHTML"
                   class="btn btn-warning-outline"
                   data-testid="confirm-differing-button"
-                  onclick='return confirm("Confirm and keep {{ item.unallocated_credit_etb }} as credit?\n\n• Retailer: {{ item.retailer_name }}\n• Invoice: {{ item.target_invoice_numbers }}\n• Raw Reference: {{ item.raw_reference or "None" }}\n\nRemaining amount will be kept on file as credit and not applied to other invoices.");'
+                  data-confirm-differing="true"
+                  data-retailer="{{ item.retailer_name|e }}"
+                  data-invoice="{{ item.target_invoice_numbers|e }}"
+                  data-ref="{{ (item.raw_reference or 'None')|e }}"
+                  data-credit="{{ item.unallocated_credit_etb|e }}"
+                  data-diff="{{ item.diff_etb|e }}"
+                  data-confirm-prompt="{% if lang == 'am' %}ቀሪውን {{ item.unallocated_credit_etb|e }} ክሬዲት አድርገህ ማረጋገጥ ትፈልጋለህ?&#10;&#10;• ነጋዴ: {{ item.retailer_name|e }}&#10;• ደረሰኝ: {{ item.target_invoice_numbers|e }}&#10;• ማጣቀሻ: {{ (item.raw_reference or 'None')|e }}&#10;&#10;የተቀረው ገንዘብ ለሌላ ደረሰኝ ሳይውል እንደ ክሬዲት ይቀመጣል። <!-- needs native review -->{% else %}Confirm and keep {{ item.unallocated_credit_etb|e }} as credit?&#10;&#10;• Retailer: {{ item.retailer_name|e }}&#10;• Invoice: {{ item.target_invoice_numbers|e }}&#10;• Raw Reference: {{ (item.raw_reference or 'None')|e }}&#10;&#10;Remaining amount will be kept on file as credit and not applied to other invoices.{% endif %}"
                   style="width: 100%; font-weight: 800;">
                   <svg class="icon" viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
                   Confirm Differing Match ({{ item.diff_etb }})
@@ -293,7 +299,8 @@
                 hx-swap="outerHTML"
                 class="btn btn-secondary"
                 data-testid="reject-match-button"
-                onclick="return confirm('Reject this suggested match? The payment line will remain in audit records.');"
+                data-confirm-reject="true"
+                data-confirm-prompt="{% if lang == 'am' %}ይህንን የተጠቆመ ማዛመጃ ውድቅ ማድረግ ይፈልጋሉ? የክፍያው መረጃ በመዝገብ ውስጥ እንዳለ ይቀራል። <!-- needs native review -->{% else %}Reject this suggested match? The payment line will remain in audit records.{% endif %}"
                 style="width: 100%;">
                 <svg class="icon" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/></svg>
                 {% if lang == 'am' %}አትቀበል (ይህ አይደለም) <!-- needs native review -->{% else %}Not this one (Reject Match){% endif %}
@@ -326,80 +333,7 @@
     </a>
   </div>
 
-  <script>
-  (function() {
-    var wrapper = document.getElementById('review-cards-wrapper');
-    if (wrapper) {
-      wrapper.classList.add('has-js');
-    }
-  })();
 
-  function showMatchCardByIndex(targetIdx) {
-    var wrapper = document.getElementById('review-cards-wrapper');
-    if (!wrapper) return;
-    var cards = wrapper.querySelectorAll('.match-card');
-    if (!cards.length) return;
-    if (targetIdx < 0) targetIdx = 0;
-    if (targetIdx >= cards.length) targetIdx = cards.length - 1;
-    cards.forEach(function(card, idx) {
-      if (idx === targetIdx) {
-        card.classList.add('is-active');
-        card.style.display = '';
-      } else {
-        card.classList.remove('is-active');
-        card.style.display = 'none';
-      }
-    });
-    var items = document.querySelectorAll('.queue-nav-item');
-    items.forEach(function(item, idx) {
-      if (idx === targetIdx) item.classList.add('is-active');
-      else item.classList.remove('is-active');
-    });
-  }
-
-  function nextMatchCard() {
-    var wrapper = document.getElementById('review-cards-wrapper');
-    if (!wrapper) return;
-    var cards = Array.from(wrapper.querySelectorAll('.match-card'));
-    var currentIdx = cards.findIndex(function(c) { return c.classList.contains('is-active'); });
-    if (currentIdx === -1) currentIdx = 0;
-    if (currentIdx < cards.length - 1) {
-      showMatchCardByIndex(currentIdx + 1);
-    }
-  }
-
-  function prevMatchCard() {
-    var wrapper = document.getElementById('review-cards-wrapper');
-    if (!wrapper) return;
-    var cards = Array.from(wrapper.querySelectorAll('.match-card'));
-    var currentIdx = cards.findIndex(function(c) { return c.classList.contains('is-active'); });
-    if (currentIdx === -1) currentIdx = 0;
-    if (currentIdx > 0) {
-      showMatchCardByIndex(currentIdx - 1);
-    }
-  }
-
-  function skipMatchCard(cardId) {
-    var el = document.getElementById('match-card-' + cardId);
-    if (!el || !el.parentNode) return;
-    el.parentNode.appendChild(el);
-    showMatchCardByIndex(0);
-  }
-
-  document.body.addEventListener('htmx:afterSwap', function(evt) {
-    var wrapper = document.getElementById('review-cards-wrapper');
-    if (!wrapper) return;
-    var remaining = wrapper.querySelectorAll('.match-card');
-    if (remaining.length > 0) {
-      var hasActive = wrapper.querySelector('.match-card.is-active');
-      if (!hasActive) {
-        remaining[0].classList.add('is-active');
-        remaining[0].style.display = '';
-      }
-      showMatchCardByIndex(0);
-    }
-  });
-  </script>
 
   {% else %}
   <!-- Empty State -->

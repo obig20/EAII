@@ -65,7 +65,8 @@
           <button
             type="button"
             id="toggle-pwd-btn"
-            onclick="togglePasswordVisibility('password', 'toggle-pwd-btn')"
+            data-action="toggle-password"
+            data-target="password"
             style="background: transparent; border: none; font-size: 0.75rem; color: var(--color-primary); font-weight: 700; cursor: pointer;">
             {% if lang == 'am' %}አሳይ <!-- needs native review -->{% else %}Show{% endif %}
           </button>
