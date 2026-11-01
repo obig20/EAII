@@ -9,14 +9,16 @@
       <h1 class="text-2xl font-black text-slate-900 tracking-tight">User Management</h1>
       <p class="text-xs text-slate-500 mt-1">Provision staff accounts, reset passwords, and manage permissions for {{ tenant_name }}.</p>
     </div>
-    <a href="/dashboard" class="text-xs font-bold text-slate-600 hover:text-slate-900 bg-white border border-slate-300 px-4 py-2 rounded-xl transition">
-      ← Back to Dashboard
+    <a href="/dashboard" class="text-xs font-bold text-slate-600 hover:text-slate-900 bg-white border border-slate-300 px-4 py-2 rounded-xl transition inline-flex items-center gap-1.5">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+      <span>Back to Dashboard</span>
     </a>
   </div>
 
   {% if message %}
-  <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-medium">
-    ✓ {{ message }}
+  <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-medium flex items-center gap-2">
+    <svg class="w-4 h-4 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+    <span>{{ message }}</span>
   </div>
   {% endif %}
 

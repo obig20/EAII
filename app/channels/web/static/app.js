@@ -221,7 +221,7 @@
 
     // F. Confirm Differing Match
     var diffBtn = e.target.closest('[data-confirm-differing]');
-    if (diffBtn) {
+    if (diffBtn && !diffBtn.hasAttribute('hx-confirm')) {
       var promptMsg = diffBtn.getAttribute('data-confirm-prompt');
       if (!promptMsg) {
         var retailer = diffBtn.getAttribute('data-retailer') || '';
@@ -245,7 +245,7 @@
 
     // G. Confirm Reject Match
     var rejBtn = e.target.closest('[data-confirm-reject]');
-    if (rejBtn) {
+    if (rejBtn && !rejBtn.hasAttribute('hx-confirm')) {
       var rejMsg = rejBtn.getAttribute('data-confirm-prompt') || 'Reject this suggested match? The payment line will remain in audit records.';
       if (!window.confirm(rejMsg)) {
         e.preventDefault();

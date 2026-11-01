@@ -50,13 +50,16 @@
     </div>
 
     <!-- Security & Fraud Protection Warning Notice -->
-    <div style="padding: 0.75rem 1rem; border-radius: var(--radius-md); background: #f0fdf4; border: 1px solid #86efac; color: #166534; font-size: 0.8125rem; font-weight: 600;">
-      🛡️ <strong>Safety Notice:</strong> Daily Close will never ask for money or passwords. Confirming this balance does not record any payment.
-      {% if expires_at %}
-      <div style="font-size: 0.75rem; color: #14532d; margin-top: 0.25rem;">
-        Link expires: <strong>{{ expires_at.strftime('%d/%m/%Y %H:%M') }}</strong> (UTC)
+    <div style="padding: 0.75rem 1rem; border-radius: var(--radius-md); background: #f0fdf4; border: 1px solid #86efac; color: #166534; font-size: 0.8125rem; font-weight: 600; display: flex; align-items: center; gap: 0.4rem;">
+      <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px; color: #166534; flex-shrink: 0;"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
+      <div>
+        <strong>Safety Notice:</strong> Daily Close will never ask for money or passwords. Confirming this balance does not record any payment.
+        {% if expires_at %}
+        <div style="font-size: 0.75rem; color: #14532d; margin-top: 0.25rem;">
+          Link expires: <strong>{{ expires_at.strftime('%d/%m/%Y %H:%M') }}</strong> (UTC)
+        </div>
+        {% endif %}
       </div>
-      {% endif %}
     </div>
 
     <!-- Total Balance Card -->
@@ -148,8 +151,8 @@
               </div>
             </div>
 
-            <button type="submit" class="btn btn-success" style="width: 100%;">
-              ✓ Confirm Balance (ትክክል ነው አረጋግጥ)
+            <button type="submit" class="btn btn-success" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.4rem;">
+              <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg> Confirm Balance (ትክክል ነው አረጋግጥ)
             </button>
           </form>
         </div>
@@ -183,8 +186,8 @@
               <textarea name="explanation" required rows="2" placeholder="Explain the difference..." class="form-input" style="min-height: 70px; resize: vertical;"></textarea>
             </div>
 
-            <button type="submit" class="btn btn-danger" style="width: 100%;">
-              ✕ Dispute Statement (ተቃውሞ አስገባ)
+            <button type="submit" class="btn btn-danger" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.4rem;">
+              <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/></svg> Dispute Statement (ተቃውሞ አስገባ)
             </button>
           </form>
         </div>

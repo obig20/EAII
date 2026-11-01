@@ -84,8 +84,9 @@
       <button
         type="submit"
         class="btn btn-primary"
-        style="width: 100%; margin-top: 0.5rem;">
-        {% if lang == 'am' %}ግባ → <!-- needs native review -->{% else %}Sign In →{% endif %}
+        style="width: 100%; margin-top: 0.5rem; display: flex; align-items: center; justify-content: center; gap: 0.4rem;">
+        <span>{% if lang == 'am' %}ግባ <!-- needs native review -->{% else %}Sign In{% endif %}</span>
+        <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px;"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
       </button>
     </form>
 

@@ -55,14 +55,17 @@
             {% if lang == 'am' %}ማዛመጃ {{ loop.index }} ከ {{ proposed_items|length }} <!-- needs native review -->{% else %}Match {{ loop.index }} of {{ proposed_items|length }}{% endif %}
           </span>
           <div style="display: flex; gap: 0.4rem; align-items: center;">
-            <button type="button" class="btn btn-secondary btn-sm" style="min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.75rem;" data-action="prev-card" title="Previous match">
-              ← {% if lang == 'am' %}ቀዳሚ <!-- needs native review -->{% else %}Prev{% endif %}
+            <button type="button" class="btn btn-secondary btn-sm" style="min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 0.25rem;" data-action="prev-card" title="Previous match">
+              <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+              <span>{% if lang == 'am' %}ቀዳሚ <!-- needs native review -->{% else %}Prev{% endif %}</span>
             </button>
-            <button type="button" class="btn btn-secondary btn-sm" style="min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.75rem;" data-action="next-card" title="Next match">
-              {% if lang == 'am' %}ቀጣይ <!-- needs native review -->{% else %}Next{% endif %} →
+            <button type="button" class="btn btn-secondary btn-sm" style="min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 0.25rem;" data-action="next-card" title="Next match">
+              <span>{% if lang == 'am' %}ቀጣይ <!-- needs native review -->{% else %}Next{% endif %}</span>
+              <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
             </button>
-            <button type="button" class="btn btn-secondary btn-sm" style="min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.75rem;" data-action="skip-card" data-card-id="{{ item.match_id or item.payment_id }}" title="Skip this match for now">
-              {% if lang == 'am' %}ለጊዜው ይለፉ ↓ <!-- needs native review -->{% else %}Skip for Now ↓{% endif %}
+            <button type="button" class="btn btn-secondary btn-sm" style="min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 0.25rem;" data-action="skip-card" data-card-id="{{ item.match_id or item.payment_id }}" title="Skip this match for now">
+              <span>{% if lang == 'am' %}ለጊዜው ይለፉ <!-- needs native review -->{% else %}Skip for Now{% endif %}</span>
+              <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
             </button>
           </div>
         </div>
@@ -169,8 +172,9 @@
               {% endif %}
             {% endif %}
           </div>
-          <div style="font-size: 0.8125rem;">
-            ⚠️ Amounts differ by {{ item.diff_etb }} ({{ item.match_kind|capitalize }})
+          <div style="font-size: 0.8125rem; display: flex; align-items: center; gap: 0.35rem;">
+            <svg class="icon" viewBox="0 0 24 24" style="color: #b45309; width: 16px; height: 16px; flex-shrink: 0;"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+            <span>Amounts differ by {{ item.diff_etb }} ({{ item.match_kind|capitalize }})</span>
             <span style="display:none;" aria-hidden="true">Amounts differ by {{ item.diff_raw_etb }} ({{ item.match_kind|capitalize }})</span>
           </div>
           {% if item.unallocated_credit_santim > 0 %}
@@ -252,6 +256,7 @@
                   data-ref="{{ (item.raw_reference or 'None')|e }}"
                   data-credit="{{ item.unallocated_credit_etb|e }}"
                   data-diff="{{ item.diff_etb|e }}"
+                  hx-confirm="{% if lang == 'am' %}ቀሪውን {{ item.unallocated_credit_etb|e }} ክሬዲት አድርገህ ማረጋገጥ ትፈልጋለህ?&#10;&#10;• ነጋዴ: {{ item.retailer_name|e }}&#10;• ደረሰኝ: {{ item.target_invoice_numbers|e }}&#10;• ማጣቀሻ: {{ (item.raw_reference or 'None')|e }}&#10;&#10;የተቀረው ገንዘብ ለሌላ ደረሰኝ ሳይውል እንደ ክሬዲት ይቀመጣል። <!-- needs native review -->{% else %}Confirm and keep {{ item.unallocated_credit_etb|e }} as credit?&#10;&#10;• Retailer: {{ item.retailer_name|e }}&#10;• Invoice: {{ item.target_invoice_numbers|e }}&#10;• Raw Reference: {{ (item.raw_reference or 'None')|e }}&#10;&#10;Remaining amount will be kept on file as credit and not applied to other invoices.{% endif %}"
                   data-confirm-prompt="{% if lang == 'am' %}ቀሪውን {{ item.unallocated_credit_etb|e }} ክሬዲት አድርገህ ማረጋገጥ ትፈልጋለህ?&#10;&#10;• ነጋዴ: {{ item.retailer_name|e }}&#10;• ደረሰኝ: {{ item.target_invoice_numbers|e }}&#10;• ማጣቀሻ: {{ (item.raw_reference or 'None')|e }}&#10;&#10;የተቀረው ገንዘብ ለሌላ ደረሰኝ ሳይውል እንደ ክሬዲት ይቀመጣል። <!-- needs native review -->{% else %}Confirm and keep {{ item.unallocated_credit_etb|e }} as credit?&#10;&#10;• Retailer: {{ item.retailer_name|e }}&#10;• Invoice: {{ item.target_invoice_numbers|e }}&#10;• Raw Reference: {{ (item.raw_reference or 'None')|e }}&#10;&#10;Remaining amount will be kept on file as credit and not applied to other invoices.{% endif %}"
                   style="width: 100%; font-weight: 800;">
                   <svg class="icon" viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
@@ -300,6 +305,7 @@
                 class="btn btn-secondary"
                 data-testid="reject-match-button"
                 data-confirm-reject="true"
+                hx-confirm="{% if lang == 'am' %}ይህንን የተጠቆመ ማዛመጃ ውድቅ ማድረግ ይፈልጋሉ? የክፍያው መረጃ በመዝገብ ውስጥ እንዳለ ይቀራል። <!-- needs native review -->{% else %}Reject this suggested match? The payment line will remain in audit records.{% endif %}"
                 data-confirm-prompt="{% if lang == 'am' %}ይህንን የተጠቆመ ማዛመጃ ውድቅ ማድረግ ይፈልጋሉ? የክፍያው መረጃ በመዝገብ ውስጥ እንዳለ ይቀራል። <!-- needs native review -->{% else %}Reject this suggested match? The payment line will remain in audit records.{% endif %}"
                 style="width: 100%;">
                 <svg class="icon" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/></svg>
@@ -307,8 +313,9 @@
               </button>
             </form>
           {% else %}
-            <div style="font-size: 0.75rem; color: var(--color-text-muted); background: #f1f5f9; padding: 0.65rem; border-radius: var(--radius-md); text-align: center; width: 100%;">
-              🔒 {% if lang == 'am' %}የባለቤት ፍቃድ ያስፈልጋል <!-- needs native review -->{% else %}Owner review required{% endif %}
+            <div style="font-size: 0.75rem; color: var(--color-text-muted); background: #f1f5f9; padding: 0.65rem; border-radius: var(--radius-md); text-align: center; width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
+              <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px; color: var(--color-text-muted);"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+              <span>{% if lang == 'am' %}የባለቤት ፍቃድ ያስፈልጋል <!-- needs native review -->{% else %}Owner review required{% endif %}</span>
             </div>
           {% endif %}
         </div>
@@ -328,8 +335,9 @@
       Need to reverse a past confirmation?
       {% endif %}
     </span>
-    <a href="#recently-confirmed" class="btn btn-secondary" style="min-height: 32px; padding: 0.25rem 0.65rem; font-size: 0.75rem; text-decoration: none;">
-      {% if lang == 'am' %}የቅርብ ጊዜ ማዛመጃዎችን ይመልከቱ ↓ <!-- needs native review -->{% else %}View Recently Confirmed ↓{% endif %}
+    <a href="#recently-confirmed" class="btn btn-secondary" style="min-height: 32px; padding: 0.25rem 0.65rem; font-size: 0.75rem; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
+      <span>{% if lang == 'am' %}የቅርብ ጊዜ ማዛመጃዎችን ይመልከቱ <!-- needs native review -->{% else %}View Recently Confirmed{% endif %}</span>
+      <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
     </a>
   </div>
 

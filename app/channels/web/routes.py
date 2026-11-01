@@ -21,7 +21,7 @@ from urllib.parse import urlparse, quote
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import case, distinct, func, select, text
+from sqlalchemy import case, distinct, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.channels.web.auth_deps import (
@@ -95,6 +95,7 @@ from app.settings import settings
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["format_money"] = format_money
+templates.env.globals["t"] = t
 
 
 def format_match_error_response(
@@ -217,22 +218,7 @@ def set_language_endpoint(lang_code: str, request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid language code. Supported languages are 'en' and 'am'.",
         )
-    referer = request.headers.get("referer", "/dashboard")
-    target_url = "/dashboard"
-    if referer:
-        try:
-            parsed = urlparse(referer)
-            # Accept only local relative paths starting with '/' (and not '//')
-            if not parsed.netloc and parsed.path.startswith("/") and not parsed.path.startswith("//"):
-                target_url = parsed.path + (f"?{parsed.query}" if parsed.query else "")
-            elif parsed.netloc:
-                req_parsed = urlparse(str(request.base_url))
-                if parsed.netloc == req_parsed.netloc and parsed.scheme == req_parsed.scheme:
-                    target_url = parsed.path + (f"?{parsed.query}" if parsed.query else "")
-        except Exception:
-            target_url = "/dashboard"
-
-    response = RedirectResponse(url=target_url, status_code=status.HTTP_303_SEE_OTHER)
+    response = RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     response.set_cookie(key="lang", value=code, max_age=365 * 24 * 3600, path="/", samesite="lax")
     return response
 
@@ -962,6 +948,68 @@ def dashboard(
         for pm, pl, inv, ret in recent_confirmed_rows
     ]
 
+    # Needs Attention payments (rejected, unmatched, accepted-unverified, previously reversed)
+    needs_attn_stmt = (
+        select(PaymentLine)
+        .where(
+            PaymentLine.tenant_id == tenant.id,
+            or_(
+                PaymentLine.state.in_([
+                    PaymentState.REJECTED.value,
+                    PaymentState.UNMATCHED.value,
+                    PaymentState.ACCEPTED_UNVERIFIED.value,
+                ]),
+                PaymentLine.is_previously_reversed.is_(True),
+            ),
+        )
+        .order_by(PaymentLine.value_date.desc(), PaymentLine.created_at.desc())
+    )
+    needs_attn_lines = session.execute(needs_attn_stmt).scalars().all()
+
+    needs_attention_items = []
+    cnt_rejected = 0
+    cnt_unmatched = 0
+    cnt_unverified = 0
+    cnt_reversed = 0
+
+    for pl in needs_attn_lines:
+        is_rej = (pl.state == PaymentState.REJECTED.value)
+        is_unm = (pl.state == PaymentState.UNMATCHED.value)
+        is_unv = (pl.state == PaymentState.ACCEPTED_UNVERIFIED.value)
+        is_rev = bool(pl.is_previously_reversed)
+
+        if is_rej:
+            cnt_rejected += 1
+        if is_unm:
+            cnt_unmatched += 1
+        if is_unv:
+            cnt_unverified += 1
+        if is_rev:
+            cnt_reversed += 1
+
+        needs_attention_items.append({
+            "id": str(pl.id),
+            "amount_etb": format_money(pl.amount_santim, include_currency=True),
+            "value_date": pl.value_date.strftime("%d/%m/%Y") if pl.value_date else "N/A",
+            "counterparty_name": pl.counterparty_name or "Unknown Counterparty",
+            "counterparty_account": pl.counterparty_account or "N/A",
+            "raw_reference": pl.raw_reference or "None",
+            "evidence_level": pl.evidence_level,
+            "state": pl.state,
+            "is_previously_reversed": is_rev,
+            "is_rejected": is_rej,
+            "is_unmatched": is_unm,
+            "is_accepted_unverified": is_unv,
+        })
+
+    needs_attention_counts = {
+        "total": len(needs_attention_items),
+        "rejected": cnt_rejected,
+        "unmatched": cnt_unmatched,
+        "accepted_unverified": cnt_unverified,
+        "previously_reversed": cnt_reversed,
+    }
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -982,6 +1030,8 @@ def dashboard(
             "today_batches_count": today_batches_count,
             "all_tasks_complete": all_tasks_complete,
             "recently_confirmed": recently_confirmed,
+            "needs_attention_items": needs_attention_items,
+            "needs_attention_counts": needs_attention_counts,
         },
     )
 

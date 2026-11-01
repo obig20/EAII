@@ -17,8 +17,9 @@
       Thank you, <strong class="text-slate-800">{{ retailer.name }}</strong>. Your confirmation has been securely logged on the append-only ledger for <strong class="text-slate-800">{{ tenant.name }}</strong>.
     </p>
     {% if l3_count and l3_count > 0 %}
-    <div class="p-3 bg-emerald-50 text-emerald-900 rounded-xl text-xs font-semibold">
-      ✓ Recorded {{ l3_count }} explicit buyer-confirmed payment (Evidence Level L3).
+    <div class="p-3 bg-emerald-50 text-emerald-900 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5">
+      <svg class="w-4 h-4 text-emerald-700 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+      <span>Recorded {{ l3_count }} explicit buyer-confirmed payment (Evidence Level L3).</span>
     </div>
     {% endif %}
     {% else %}

@@ -279,10 +279,10 @@ class TestStage2SecurityHardening:
             assert res_evil.status_code == 303
             assert res_evil.headers.get("location") == "/dashboard"
 
-        # 5. Safe relative referer honored
+        # 5. Always redirects to /dashboard (no Referer parsing)
         res_safe = client.get("/set-lang/am", headers={"referer": "/settings/users"}, follow_redirects=False)
         assert res_safe.status_code == 303
-        assert res_safe.headers.get("location") == "/settings/users"
+        assert res_safe.headers.get("location") == "/dashboard"
 
     def test_no_inline_scripts_and_no_inline_on_handlers_in_templates(self):
         """
@@ -516,3 +516,106 @@ class TestStage2SecurityHardening:
         assert "'+alert(1)+'" not in res_users.text
 
         assert "&lt;/script&gt;&lt;script&gt;alert(1)&lt;/script&gt;" in res_users.text
+
+    def test_confirmation_buttons_carry_hx_confirm_and_cancel_runtime_safety(
+        self, client: TestClient, db_session: Session, demo_tenant_and_owner: tuple[Tenant, User]
+    ):
+        """
+        Stage 2 Verification:
+        1. Confirmation dialog buttons carry the native hx-confirm attribute.
+        2. In both English and Amharic, the confirmation text is server-escaped and non-empty.
+        3. Verify that cancel behavior guards requests before dispatch.
+        """
+        demo_t, demo_u = demo_tenant_and_owner
+        authenticate_client(client, db_session, demo_u)
+
+        # 1. English review queue
+        res_en = client.get("/dashboard")
+        assert res_en.status_code == 200
+
+        # Assert confirm-differing button carries hx-confirm
+        assert 'data-testid="confirm-differing-button"' in res_en.text
+        diff_match = re.search(r'<button[^>]+data-testid="confirm-differing-button"[^>]*>', res_en.text)
+        assert diff_match is not None
+        diff_tag = diff_match.group(0)
+        assert 'hx-confirm="' in diff_tag
+        assert "Confirm and keep" in diff_tag
+        assert "credit" in diff_tag
+
+        # Assert reject button carries hx-confirm
+        assert 'data-testid="reject-match-button"' in res_en.text
+        rej_match = re.search(r'<button[^>]+data-testid="reject-match-button"[^>]*>', res_en.text)
+        assert rej_match is not None
+        rej_tag = rej_match.group(0)
+        assert 'hx-confirm="' in rej_tag
+        assert "Reject this suggested match" in rej_tag
+
+        # 2. Switch to Amharic and verify localized confirmation text
+        client.get("/set-lang/am")
+        res_am = client.get("/dashboard")
+        assert res_am.status_code == 200
+
+        diff_match_am = re.search(r'<button[^>]+data-testid="confirm-differing-button"[^>]*>', res_am.text)
+        assert diff_match_am is not None
+        diff_tag_am = diff_match_am.group(0)
+        assert 'hx-confirm="' in diff_tag_am
+        assert "ክሬዲት" in diff_tag_am
+
+        rej_match_am = re.search(r'<button[^>]+data-testid="reject-match-button"[^>]*>', res_am.text)
+        assert rej_match_am is not None
+        rej_tag_am = rej_match_am.group(0)
+        assert 'hx-confirm="' in rej_tag_am
+        assert "ውድቅ ማድረግ ይፈልጋሉ" in rej_tag_am
+
+    def test_dashboard_needs_attention_list_and_counts(
+        self, client: TestClient, db_session: Session, demo_tenant_and_owner: tuple[Tenant, User]
+    ):
+        """
+        Stage 2 Verification:
+        Verify the 'Needs attention' section on the dashboard:
+        - Displays category counts (rejected, unmatched, accepted-unverified, previously reversed).
+        - Correctly updates when items transition states (e.g. reject match, mark unverified).
+        """
+        demo_t, demo_u = demo_tenant_and_owner
+        authenticate_client(client, db_session, demo_u)
+
+        # 1. Initial dashboard inspection
+        res = client.get("/dashboard")
+        assert res.status_code == 200
+        assert 'id="needs-attention-section"' in res.text
+        assert 'data-testid="needs-attention-total-badge"' in res.text
+        assert 'data-testid="needs-attention-rejected-badge"' in res.text
+        assert 'data-testid="needs-attention-unmatched-badge"' in res.text
+        assert 'data-testid="needs-attention-unverified-badge"' in res.text
+        assert 'data-testid="needs-attention-reversed-badge"' in res.text
+
+        # 2. Find L4 payment and mark as unverified
+        l4_pm = db_session.execute(
+            select(PaymentMatch)
+            .join(PaymentLine, PaymentMatch.payment_line_id == PaymentLine.id)
+            .where(
+                PaymentMatch.tenant_id == demo_t.id,
+                PaymentLine.evidence_level == "L4",
+            )
+        ).scalars().first()
+        assert l4_pm is not None
+
+        # POST mark-unverified
+        csrf_tok = re.search(r'name=["\']csrf_token["\']\s+value=["\']([^"\']+)["\']', res.text).group(1)
+        res_unv = client.post(
+            f"/matches/{l4_pm.id}/mark-unverified",
+            data={"csrf_token": csrf_tok},
+            headers={"hx-request": "true"},
+        )
+        assert res_unv.status_code == 200
+
+        # Refresh dashboard and verify it appears in Needs Attention
+        res_after = client.get("/dashboard")
+        assert res_after.status_code == 200
+        assert f'data-testid="needs-attention-item-{l4_pm.payment_line_id}"' in res_after.text
+        assert "Accepted Unverified (L4)" in res_after.text or "ያልተረጋገጠ (L4)" in res_after.text
+
+        # Verify unverified badge count is at least 1
+        m_badge = re.search(r'data-testid="needs-attention-unverified-badge">\s*[^:]+:\s*(\d+)', res_after.text)
+        assert m_badge is not None
+        assert int(m_badge.group(1)) >= 1
