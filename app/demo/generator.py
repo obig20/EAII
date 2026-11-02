@@ -11,7 +11,7 @@ Populates:
       * 1 Tier C match (fuzzy name match, review queue)
       * 1 Differing amount / partial payment (review queue, partial label)
       * 1 Overpayment with unallocated credit remainder (review queue, overpayment label)
-      * 1 L4 cash receipt note ("Woizero Almaz brought cash", cannot auto-confirm)
+      * 1 L4 cash receipt note ("Selam General Store brought cash", cannot auto-confirm)
 """
 
 from __future__ import annotations
@@ -336,7 +336,7 @@ def seed_demo_data(
         created_at=now,
     )
 
-    # Line 4: Tier B phone/account match (INV-2026-007, 60,000 ETB) -> Review Queue
+    # Line 4: Tier B phone/account match (INV-2026-007, 60,000 ETB) -> Review Queue (Card 1: Exact bank match)
     pl4 = PaymentLine(
         id=uuid.uuid4(),
         tenant_id=tenant.id,
@@ -344,7 +344,7 @@ def seed_demo_data(
         source_ref="FT2610B104",
         row_key="demo-row-4",
         amount_santim=6000000,
-        value_date=today - timedelta(days=2),
+        value_date=today - timedelta(days=1),
         counterparty_name="Abebe Grain Wholesale",
         counterparty_account=retailers[1].bank_account,
         raw_reference=f"Transfer from mobile {retailers[1].phone}",
@@ -363,7 +363,7 @@ def seed_demo_data(
         created_at=now,
     )
 
-    # Line 5: Tier B account match (INV-2026-008, 35,000 ETB) -> Review Queue
+    # Line 5: Tier B account match (INV-2026-008, 35,000 ETB) -> Review Queue (Card 4: Other bank match)
     pl5 = PaymentLine(
         id=uuid.uuid4(),
         tenant_id=tenant.id,
@@ -371,7 +371,7 @@ def seed_demo_data(
         source_ref="FT2610B105",
         row_key="demo-row-5",
         amount_santim=3500000,
-        value_date=today - timedelta(days=2),
+        value_date=today - timedelta(days=4),
         counterparty_name="Berhan Stationery",
         counterparty_account=retailers[2].bank_account,
         raw_reference=f"CBE Birr from acct {retailers[2].bank_account}",
@@ -390,7 +390,7 @@ def seed_demo_data(
         created_at=now,
     )
 
-    # Line 6: Tier C fuzzy name match (INV-2026-009, 125,000 ETB) -> Review Queue
+    # Line 6: Tier C fuzzy name match (INV-2026-009, 125,000 ETB) -> Review Queue (Card 5: Other bank match)
     pl6 = PaymentLine(
         id=uuid.uuid4(),
         tenant_id=tenant.id,
@@ -398,7 +398,7 @@ def seed_demo_data(
         source_ref="FT2610C106",
         row_key="demo-row-6",
         amount_santim=12500000,
-        value_date=today - timedelta(days=3),
+        value_date=today - timedelta(days=5),
         counterparty_name="Almaz Wholesalers",
         raw_reference="Direct Bank Transfer Addis Ababa",
         evidence_level="L2",
@@ -416,7 +416,7 @@ def seed_demo_data(
         created_at=now,
     )
 
-    # Line 7: Differing amount / Partial payment (INV-2026-010 open 120,000 ETB, paying 80,000 ETB)
+    # Line 7: Differing amount / Partial payment (INV-2026-010 open 120,000 ETB, paying 80,000 ETB) (Card 3: Partial)
     pl7 = PaymentLine(
         id=uuid.uuid4(),
         tenant_id=tenant.id,
@@ -424,7 +424,7 @@ def seed_demo_data(
         source_ref="FT2610PART07",
         row_key="demo-row-7",
         amount_santim=8000000,
-        value_date=today - timedelta(days=1),
+        value_date=today - timedelta(days=3),
         counterparty_name="Tadesse Building Materials",
         counterparty_account=retailers[3].bank_account,
         raw_reference=f"Partial settlement for {invoices[9].invoice_number}",
@@ -443,7 +443,7 @@ def seed_demo_data(
         created_at=now,
     )
 
-    # Line 8: Overpayment with credit remainder (INV-2026-011 open 40,000 ETB, paying 55,000 ETB)
+    # Line 8: Overpayment with credit remainder (INV-2026-011 open 40,000 ETB, paying 55,000 ETB) (Card 2: Overpayment)
     pl8 = PaymentLine(
         id=uuid.uuid4(),
         tenant_id=tenant.id,
@@ -451,7 +451,7 @@ def seed_demo_data(
         source_ref="FT2610OVER08",
         row_key="demo-row-8",
         amount_santim=5500000,
-        value_date=today - timedelta(days=1),
+        value_date=today - timedelta(days=2),
         counterparty_name="Tewodros Cosmetics",
         counterparty_account=retailers[4].bank_account,
         raw_reference=f"Settlement & advance deposit for {invoices[10].invoice_number}",
@@ -470,7 +470,7 @@ def seed_demo_data(
         created_at=now,
     )
 
-    # Line 9: L4 receipt note ("Woizero Almaz brought cash", cannot auto-confirm)
+    # Line 9: L4 receipt note ("Selam General Store brought cash", cannot auto-confirm) (Card 6: Unverified photo LAST)
     pl9 = PaymentLine(
         id=uuid.uuid4(),
         tenant_id=tenant.id,
@@ -478,9 +478,9 @@ def seed_demo_data(
         source_ref="CASH-REC-4891",
         row_key="demo-row-9",
         amount_santim=2500000,
-        value_date=today,
-        counterparty_name="Almaz & Sons Trading",
-        raw_reference="Cash receipt #4891: Woizero Almaz brought cash to office 25,000 ETB",
+        value_date=today - timedelta(days=6),
+        counterparty_name="Selam General Store",
+        raw_reference="Cash receipt #4891: Selam General Store brought cash to office 25,000 ETB",
         evidence_level="L4",
         state=PaymentState.PROPOSED.value,
         created_at=now,

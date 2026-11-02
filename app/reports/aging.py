@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.kernel.enums import MatchState
 from app.kernel.models import Invoice, PaymentMatch, Retailer
-from app.kernel.money import to_etb
+from app.kernel.money import format_money, to_etb
 
 
 @dataclass

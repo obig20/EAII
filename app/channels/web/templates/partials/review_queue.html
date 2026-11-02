@@ -36,7 +36,17 @@
         <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.7rem; color: var(--color-text-muted);">
           <span>Match {{ loop.index }} of {{ proposed_items|length }}</span>
           <span class="badge {% if nav_item.evidence_level == 'L4' %}badge-unverified{% elif nav_item.evidence_level == 'L1' %}badge-success{% else %}badge-info{% endif %}" style="padding: 0.1rem 0.4rem; font-size: 0.65rem;">
-            {{ nav_item.evidence_level }}
+            {% if nav_item.evidence_level == 'L1' %}
+              {{ t('evidence_level_l1', lang=lang) }}
+            {% elif nav_item.evidence_level == 'L2' %}
+              {{ t('evidence_level_l2', lang=lang) }}
+            {% elif nav_item.evidence_level == 'L3' %}
+              {{ t('evidence_level_l3', lang=lang) }}
+            {% elif nav_item.evidence_level == 'L4' %}
+              {{ t('evidence_level_l4', lang=lang) }}
+            {% else %}
+              {{ nav_item.evidence_level }}
+            {% endif %}
           </span>
         </div>
       </div>
@@ -101,15 +111,15 @@
             <div style="margin-top: 0.4rem; display: flex; flex-wrap: wrap; gap: 0.35rem;">
               <span class="badge {% if item.evidence_level == 'L4' %}badge-unverified{% elif item.evidence_level == 'L1' %}badge-success{% else %}badge-info{% endif %}">
                 {% if item.evidence_level == 'L1' %}
-                  {% if lang == 'am' %}በክፍያ አቅራቢው የተረጋገጠ <!-- needs native review -->{% else %}Confirmed by payment provider{% endif %}
+                  {{ t('evidence_level_l1', lang=lang) }}
                 {% elif item.evidence_level == 'L2' %}
-                  {% if lang == 'am' %}በባንክ መግለጫ ላይ የተገኘ <!-- needs native review -->{% else %}Found on bank statement{% endif %}
+                  {{ t('evidence_level_l2', lang=lang) }}
                 {% elif item.evidence_level == 'L3' %}
-                  {% if lang == 'am' %}በደንበኛው በቀጥታ የተረጋገጠ <!-- needs native review -->{% else %}Confirmed directly by customer{% endif %}
+                  {{ t('evidence_level_l3', lang=lang) }}
                 {% elif item.evidence_level == 'L4' %}
-                  {% if lang == 'am' %}ያልተረጋገጠ የደረሰኝ ፎቶ / ስክሪንሾት (እንደተከፈለ አይቆጠርም) <!-- needs native review -->{% else %}Unverified receipt photo / screenshot (not counted as paid){% endif %}
+                  {{ t('evidence_level_l4', lang=lang) }}
                 {% else %}
-                  Evidence: {{ item.evidence_level }}
+                  {{ item.evidence_level }}
                 {% endif %}
               </span>
 
@@ -188,10 +198,18 @@
         {% else %}
         <div class="match-exact-summary" style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: var(--radius-md); padding: 0.65rem 0.85rem; font-size: 0.8125rem; color: #166534; margin: 0.65rem 0; font-weight: 600;">
           <svg class="icon" viewBox="0 0 24 24" style="color: #16a34a; width: 16px; height: 16px; vertical-align: -3px;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
-          {% if lang == 'am' %}
-          ደንበኛው {{ item.amount_etb }} ከፍሏል። የደረሰኝ ሂሳብ {{ item.invoice_amount_etb }} ነው። ሙሉ በሙሉ ይዛመዳል — ምንም ልዩነት የለም። <!-- needs native review -->
+          {% if item.evidence_level == 'L4' %}
+            {% if lang == 'am' %}
+            መጠኑ ይዛመዳል፣ ነገር ግን ፎቶ እንደተከፈለ ሊቆጠር አይችልም። <!-- needs native review -->
+            {% else %}
+            Amounts agree, but a photo cannot be counted as paid.
+            {% endif %}
           {% else %}
-          Customer paid {{ item.amount_etb }}. Invoice is {{ item.invoice_amount_etb }}. Exact match — no difference.
+            {% if lang == 'am' %}
+            ደንበኛው {{ item.amount_etb }} ከፍሏል። የደረሰኝ ሂሳብ {{ item.invoice_amount_etb }} ነው። ሙሉ በሙሉ ይዛመዳል — ምንም ልዩነት የለም። <!-- needs native review -->
+            {% else %}
+            Customer paid {{ item.amount_etb }}. Invoice is {{ item.invoice_amount_etb }}. Exact match — no difference.
+            {% endif %}
           {% endif %}
         </div>
         {% endif %}
@@ -199,7 +217,7 @@
         <!-- "Why we think so" Plain Reason -->
         <div style="background: #f8fafc; border: 1px solid var(--color-border-subtle); border-radius: var(--radius-sm); padding: 0.5rem 0.75rem; font-size: 0.8125rem; color: #334155; margin-bottom: 0.65rem;">
           <strong style="color: var(--color-text-main);">
-            {% if lang == 'am' %}ይህ የተመረጠበት ምክንያት (ለምን አሰብን?)፡ <!-- needs native review -->{% else %}Why it matched (Why we think so):{% endif %}
+            {% if lang == 'am' %}ለምን አሰብን?፡ <!-- needs native review -->{% else %}Why we think so:{% endif %}
           </strong> {{ item.reason }}
         </div>
 

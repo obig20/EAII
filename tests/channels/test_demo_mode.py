@@ -169,7 +169,7 @@ class TestDemoCreationAndPopulation:
 
         # Check L4 cash note
         l4_line = [l for l in lines if l.evidence_level == "L4"][0]
-        assert "Woizero Almaz brought cash" in l4_line.raw_reference
+        assert "Selam General Store brought cash" in l4_line.raw_reference
         assert l4_line.state == PaymentState.PROPOSED.value  # Cannot auto-confirm!
 
 

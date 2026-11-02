@@ -61,5 +61,9 @@
   "owner_review_required": "የባለቤት ፍቃድ ያስፈልጋል (needs native review)",
   "sign_in_btn": "ግባ (needs native review)",
   "back_to_dashboard": "ወደ ዳሽቦርድ ተመለስ (needs native review)",
-  "balance_confirmation_title": "የሂሳብ ማረጋገጫ መግለጫ (needs native review)"
+  "balance_confirmation_title": "የሂሳብ ማረጋገጫ መግለጫ (needs native review)",
+  "evidence_level_l1": "የክፍያ አቅራቢ (needs native review)",
+  "evidence_level_l2": "የባንክ መግለጫ (needs native review)",
+  "evidence_level_l3": "በነጋዴው የተረጋገጠ (needs native review)",
+  "evidence_level_l4": "ፎቶ ወይም ማስታወሻ (needs native review)"
 }

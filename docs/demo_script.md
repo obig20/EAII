@@ -92,8 +92,8 @@ A guided walkthrough for wholesale owners, cashiers, and stakeholders demonstrat
 ---
 
 ### Step 5: Mark Unverified Photo / Cash Receipt Note (1:15)
-1. Observe the card for **Almaz & Sons Trading** (`CASH-REC-4891`, 25,000.00 ETB):
-   - Reference: `Cash receipt #4891: Woizero Almaz brought cash to office 25,000 ETB`.
+1. Observe the card for **Selam General Store** (`CASH-REC-4891`, 25,000.00 ETB):
+   - Reference: `Cash receipt #4891: Selam General Store brought cash to office 25,000 ETB`.
    - Evidence Level: `L4` (Unverified manual receipt note).
    - Routine "Confirm Match" button is **strictly hidden** (Rule 2 Invariant).
 2. Click **Accept as unverified (not counted as paid)**.

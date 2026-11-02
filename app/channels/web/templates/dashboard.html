@@ -21,7 +21,7 @@
         {% if lang == 'am' %}ያልተከፈለ አጠቃላይ <!-- needs native review -->{% else %}Total Unpaid{% endif %}
       </div>
       <div class="kpi-val">
-        {{ aging_report.grand_total_outstanding_etb }}
+        {{ aging_report.grand_total_outstanding_santim | format_money }}
       </div>
       <div style="font-size: 0.75rem; color: var(--color-text-muted); margin-top: 0.25rem;">
         {{ aging_report.retailers|length }} {% if lang == 'am' %}ደንበኞች{% else %}debtor accounts{% endif %}
@@ -33,7 +33,7 @@
         {% if lang == 'am' %}ቀኑ ያለፈበት <!-- needs native review -->{% else %}Overdue{% endif %}
       </div>
       <div class="kpi-val overdue">
-        {{ aging_report.grand_total_overdue_etb }}
+        {{ aging_report.grand_total_overdue_santim | format_money }}
       </div>
       <div style="font-size: 0.75rem; color: var(--color-danger); margin-top: 0.25rem;">
         {% if aging_report.grand_total_overdue_santim > 0 %}
@@ -110,7 +110,12 @@
             </div>
             <div style="font-size: 0.75rem; color: var(--color-text-muted); margin-top: 0.15rem;">
               {% if today_sales_count > 0 %}
-                <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px; color: var(--color-success); display: inline-block; vertical-align: middle;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg> {{ today_sales_count }} {% if lang == 'am' %}ደረሰኞች ዛሬ ተመዝግበዋል{% else %}invoice(s) recorded today{% endif %}
+                <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px; color: var(--color-success); display: inline-block; vertical-align: middle;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg> {{ today_sales_count }}
+                {% if lang == 'am' %}
+                  {% if today_sales_count == 1 %}ደረሰኝ ዛሬ ተመዝግቧል{% else %}ደረሰኞች ዛሬ ተመዝግበዋል{% endif %} <!-- needs native review -->
+                {% else %}
+                  {% if today_sales_count == 1 %}invoice recorded today{% else %}invoices recorded today{% endif %}
+                {% endif %}
               {% else %}
                 {% if lang == 'am' %}ዛሬ የተመዘገበ ሽያጭ የለም — ለመመዝገብ ይንኩ{% else %}No credit sales entered today — tap to record{% endif %}
               {% endif %}
@@ -192,7 +197,12 @@
             </div>
             <div style="font-size: 0.75rem; color: var(--color-text-muted); margin-top: 0.15rem;">
               {% if today_batches_count > 0 %}
-                <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px; color: var(--color-success); display: inline-block; vertical-align: middle;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg> {{ today_batches_count }} {% if lang == 'am' %}መግለጫ(ዎች) ዛሬ ገብተዋል{% else %}statement batch(es) imported today{% endif %}
+                <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px; color: var(--color-success); display: inline-block; vertical-align: middle;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg> {{ today_batches_count }}
+                {% if lang == 'am' %}
+                  {% if today_batches_count == 1 %}መግለጫ ዛሬ ገብቷል{% else %}መግለጫዎች ዛሬ ገብተዋል{% endif %} <!-- needs native review -->
+                {% else %}
+                  {% if today_batches_count == 1 %}statement batch imported today{% else %}statement batches imported today{% endif %}
+                {% endif %}
               {% else %}
                 {% if lang == 'am' %}የCBE፣ ቴሌብር ወይም ዳሸን ፋይል ያስገቡ{% else %}Import CBE CSV, Telebirr XLSX, or Dashen CSV{% endif %}
               {% endif %}
@@ -250,7 +260,11 @@
                 <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px; color: var(--color-success); display: inline-block; vertical-align: middle;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg> {% if lang == 'am' %}ሁሉም ክፍያዎች ዛሬ ተረጋግጠዋል{% else %}All payments confirmed for today{% endif %}
               {% else %}
                 <span id="step3-review-count" style="font-weight: 800; color: var(--color-primary);">{{ proposed_items|length }}</span>
-                {% if lang == 'am' %}ክፍያዎች የባለቤት ማረጋገጫ ይጠብቃሉ{% else %}suggested match(es) awaiting review{% endif %}
+                {% if lang == 'am' %}
+                  {% if proposed_items|length == 1 %}የተጠቆመ ክፍያ የባለቤት ማረጋገጫ ይጠብቃል{% else %}የተጠቆሙ ክፍያዎች የባለቤት ማረጋገጫ ይጠብቃሉ{% endif %} <!-- needs native review -->
+                {% else %}
+                  {% if proposed_items|length == 1 %}suggested match awaiting review{% else %}suggested matches awaiting review{% endif %}
+                {% endif %}
               {% endif %}
             </div>
           </div>

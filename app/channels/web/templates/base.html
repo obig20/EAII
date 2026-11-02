@@ -20,7 +20,7 @@
         {% if lang == 'am' %}የማሳያ ሁኔታ{% else %}Demo Mode{% endif %}
       </span>
       <span>
-        {% if lang == 'am' %}የአዲስ አበባ ጅምላ ንግድ ማሳያ — መረጃው በየቀኑ ይታደሳል።{% else %}Addis Ababa Wholesale Demonstration — Data resets daily.{% endif %}
+        {% if lang == 'am' %}የአዲስ አበባ ጅምላ ንግድ ማሳያ — የማሳያ መረጃ ነው። ወደ ነበረበት ለመመለስ «መረጃ አድስ»ን ይጫኑ። <!-- needs native review -->{% else %}Addis Ababa Wholesale Demonstration — Demo data. Press Reset to restore it.{% endif %}
       </span>
     </div>
     <form action="/demo/reset" method="POST" style="margin: 0;">

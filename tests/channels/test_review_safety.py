@@ -239,7 +239,7 @@ class TestReviewQueueDisplayAndStaleTokens:
         assert "Selam General Store" in res.text
         assert inv1.invoice_number in res.text
         assert "INV-ALT-999" in res.text
-        assert "Why it matched" in res.text
+        assert "Why we think so" in res.text
 
     def test_differing_amount_requires_extra_confirmation(
         self, client: TestClient, db_session: Session, tenant: Tenant, owner: User, retailer: Retailer
@@ -454,7 +454,7 @@ class TestAllocationLabelsAndUnallocatedCredit:
         authenticate_client(client, db_session, owner)
         res = client.get("/")
         assert res.status_code == 200
-        assert "5000.00 ETB" in res.text
+        assert "5,000.00 ETB" in res.text
         # Exact match does not display differing warning
         assert "Amounts differ" not in res.text
 
@@ -1816,7 +1816,7 @@ class TestStage2ReviewQueueUIInvariants:
         # Invariant 2: Unverified button and clear 'not counted as paid' label are present
         assert "data-testid=\"mark-unverified-button\"" in l4_html or "data-testid='mark-unverified-button'" in l4_html
         assert "not counted as paid" in l4_html.lower() or "እንደተከፈለ አይቆጠርም" in l4_html
-        assert "Unverified receipt photo / screenshot" in l4_html or "ያልተረጋገጠ የደረሰኝ ፎቶ" in l4_html
+        assert "Photo or note" in l4_html or "ፎቶ ወይም ማስታወሻ" in l4_html or "Unverified receipt photo / screenshot" in l4_html
 
     def test_stage2_ui_invariant_differing_amount_step_is_explicit(
         self, client: TestClient, db_session: Session, demo_tenant_and_owner: tuple[Tenant, User]
@@ -1872,7 +1872,7 @@ class TestStage2ReviewQueueUIInvariants:
 
         # Invariant 4: Progress counter, side-by-side comparison, and Why we think so
         assert "Match 1 of 6" in res.text
-        assert "Why it matched (Why we think so):" in res.text
+        assert "Why we think so:" in res.text
         assert "Suggested match, please check:" in res.text
         # No raw internal tier jargon exposed in review queue
         assert "Tier A match" not in res.text

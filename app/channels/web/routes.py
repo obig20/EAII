@@ -85,7 +85,12 @@ from app.kernel.retailer_confirmation import (
 from app.kernel.sales import DuplicateInvoiceError, InvalidSaleError, parse_and_record_sales_csv, record_credit_sale
 from app.kernel.tenant import set_tenant
 from app.matching.matcher import PaymentMatcher
-from app.matching.normalization import normalize_phone
+from app.matching.normalization import (
+    normalize_account_number,
+    normalize_ethiopian_name,
+    normalize_phone,
+    string_similarity,
+)
 from app.reports.aging import generate_aging_report
 from app.reports.exports import export_accountant_csv, export_payments_csv, export_reversals_csv, export_sales_csv
 from app.reports.morning_brief import generate_morning_brief_text
@@ -135,6 +140,114 @@ def get_pending_review_queue_count(session: Session, tenant_id: uuid.UUID) -> in
             PaymentLine.state.in_([PaymentState.PROPOSED.value, PaymentState.UNMATCHED.value]),
         )
     ).scalar_one()
+
+
+def build_match_signals_explanation(
+    payment_line: PaymentLine,
+    target_invoice: Invoice | None,
+    payment_match: PaymentMatch | None,
+    match_kind: str,
+    diff_santim: int,
+    unallocated_credit_santim: int,
+) -> str:
+    """
+    Build structured "Why we think so" explanation strictly from real domain signals:
+    - Invoice number presence in reference
+    - Phone or bank account match
+    - Name similarity score
+    - Amount equality / difference
+    - Value date window relative to invoice date
+    States mismatches in plain words (e.g. "Customer name does not match").
+    Zero AI, zero external calls.
+    """
+    if not target_invoice:
+        return "Suggested match, please check: unverified payment awaiting review against open invoices."
+
+    signals: list[str] = []
+    mismatches: list[str] = []
+    ret = target_invoice.retailer
+    ret_name = ret.name.split("/")[0].strip() if ret else "Unknown"
+
+    # 1. Invoice number in reference
+    raw_ref = (payment_line.raw_reference or "").strip()
+    if target_invoice.invoice_number and target_invoice.invoice_number.lower() in raw_ref.lower():
+        signals.append(f"Invoice number '{target_invoice.invoice_number}' found in payment reference")
+    else:
+        mismatches.append("Invoice number not in payment reference")
+
+    # 2. Account or phone match
+    acct_matched = False
+    phone_matched = False
+    if ret and ret.bank_account and payment_line.counterparty_account:
+        norm_pl_acct = normalize_account_number(payment_line.counterparty_account)
+        norm_ret_acct = normalize_account_number(ret.bank_account)
+        if norm_pl_acct and norm_ret_acct and norm_pl_acct == norm_ret_acct:
+            signals.append(f"Bank account matched ({payment_line.counterparty_account})")
+            acct_matched = True
+
+    if ret and ret.phone:
+        norm_phone = normalize_phone(ret.phone)
+        if norm_phone and (norm_phone in raw_ref or ret.phone in raw_ref):
+            signals.append(f"Phone number matched ({ret.phone})")
+            phone_matched = True
+        elif payment_line.counterparty_account:
+            norm_pl_phone = normalize_phone(payment_line.counterparty_account)
+            if norm_pl_phone and norm_pl_phone == norm_phone:
+                signals.append(f"Phone number matched ({ret.phone})")
+                phone_matched = True
+
+    if not acct_matched and not phone_matched:
+        if payment_line.counterparty_account:
+            mismatches.append(f"Account '{payment_line.counterparty_account}' does not match customer account")
+        else:
+            mismatches.append("No counterparty account provided")
+
+    # 3. Customer name similarity
+    if payment_line.counterparty_name and ret:
+        norm_cp = normalize_ethiopian_name(payment_line.counterparty_name)
+        norm_ret = normalize_ethiopian_name(ret.name)
+        sim = string_similarity(norm_cp, norm_ret)
+        cp_lower = payment_line.counterparty_name.lower()
+        if sim >= 0.70 or norm_cp in norm_ret or norm_ret in norm_cp or ret_name.lower() in cp_lower:
+            pct = int(round(max(sim, 0.85) * 100)) if (norm_cp in norm_ret or norm_ret in norm_cp or ret_name.lower() in cp_lower) else int(round(sim * 100))
+            signals.append(f"Customer name matched with {pct}% similarity ('{payment_line.counterparty_name}')")
+        else:
+            mismatches.append(f"Customer name does not match ('{payment_line.counterparty_name}' vs '{ret_name}')")
+    elif not payment_line.counterparty_name:
+        mismatches.append("No counterparty name provided")
+
+    # 4. Amount comparison
+    if payment_line.amount_santim == target_invoice.amount_santim:
+        signals.append(f"Exact amount match ({format_money(payment_line.amount_santim, include_currency=True)})")
+    elif payment_line.amount_santim < target_invoice.amount_santim:
+        signals.append(
+            f"Partial payment: payment of {format_money(payment_line.amount_santim, include_currency=True)} is less than invoice open balance of {format_money(target_invoice.amount_santim, include_currency=True)} ({format_money(diff_santim, include_currency=True)} remaining)"
+        )
+    else:
+        signals.append(
+            f"Overpayment: payment of {format_money(payment_line.amount_santim, include_currency=True)} exceeds invoice open balance of {format_money(target_invoice.amount_santim, include_currency=True)} ({format_money(unallocated_credit_santim, include_currency=True)} kept as credit)"
+        )
+
+    # 5. Date window
+    if payment_line.value_date and target_invoice.issued_date:
+        days_after = (payment_line.value_date - target_invoice.issued_date).days
+        if days_after >= 0:
+            signals.append(f"Payment received {days_after} days after invoice was issued")
+        else:
+            mismatches.append(f"Payment date is {-days_after} days before invoice date")
+
+    # Special note for L4 evidence
+    if payment_line.evidence_level == "L4":
+        signals.insert(0, "Manual receipt photo or note (Evidence Level L4 — unverified)")
+
+    parts = []
+    if signals:
+        parts.append("; ".join(signals))
+    if mismatches:
+        parts.append("Mismatches: " + "; ".join(mismatches))
+
+    return "Suggested match, please check: " + ". ".join(parts) + "."
+
 
 # File upload security limits
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB limit
@@ -857,19 +970,24 @@ def dashboard(
                     "retailer_label": "same retailer" if is_same else "different retailer",
                 })
 
-            # Plain-language "Why it matched" built from structured fields (No AI)
-            ret_display = target_inv.retailer.name if target_inv.retailer else "Unknown"
-            if pm.tier == "tier_a":
-                if is_differing:
-                    reason = f"Suggested match, please check: invoice '{target_inv.invoice_number}' referenced with {match_kind} amount"
-                else:
-                    reason = f"Suggested match, please check: invoice number '{target_inv.invoice_number}' referenced in payment line with exact amount match"
-            elif pm.tier == "tier_b":
-                reason = f"Suggested match, please check: counterparty account/phone matched for retailer '{ret_display}'"
-            else:
-                reason = f"Suggested match, please check: candidate open invoice for retailer '{ret_display}' based on name and amount similarity"
+            # Structured "Why we think so" built strictly from domain signals (No AI)
+            reason = build_match_signals_explanation(
+                payment_line=pl,
+                target_invoice=target_inv,
+                payment_match=pm,
+                match_kind=match_kind,
+                diff_santim=diff_santim,
+                unallocated_credit_santim=unallocated_credit_santim,
+            )
         elif pl.state == "proposed":
-            reason = "Suggested match, please check: unverified payment awaiting review against open invoices"
+            reason = build_match_signals_explanation(
+                payment_line=pl,
+                target_invoice=None,
+                payment_match=None,
+                match_kind="unmatched",
+                diff_santim=0,
+                unallocated_credit_santim=0,
+            )
 
         proposed_items.append({
             "payment_id": str(pl.id),
