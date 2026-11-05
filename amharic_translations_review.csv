@@ -1,0 +1,51 @@
+English String,Amharic Translation (needs native review),Context / Screen,Status
+,{% if lang == 'am' %}የብድር ዕድሜ ሪፖርት,aging_table.html,needs native review
+,ከ{{ report.as_of_date.strftime('%d/%m/%Y') }} ጀምሮ · የተረጋገጡ ክፍያዎች ብቻ ሂሳብን ይቀንሳሉ,aging_table.html,needs native review
+,{% if lang == 'am' %}አጠቃላይ ያልተከፈለ ቀሪ ሂሳብ,confirm_balance.html,needs native review
+,{% if lang == 'am' %}የቀሪ ሂሳብ ማረጋገጫ መግለጫ,confirm_balance.html,needs native review
+,{% if lang == 'am' %}የክፍት ደረሰኞች ዝርዝር,confirm_balance.html,needs native review
+,{% if lang == 'am' %}ቀኑ ያለፈበት,dashboard.html,needs native review
+,{% if lang == 'am' %}በቅርብ የተረጋገጡ ክፍያዎች (መመለሻ),dashboard.html,needs native review
+,{% if lang == 'am' %}የቀረቡ ክፍያዎችን ይገምግሙ,dashboard.html,needs native review
+,{% if lang == 'am' %}የባንክ ወይም የቴሌብር መግለጫ ያስገቡ,dashboard.html,needs native review
+,{% if lang == 'am' %}የዛሬው የሂሳብ ማጠቃለያ ስራዎች,dashboard.html,needs native review
+,{% if lang == 'am' %}የዛሬውን የብድር ሽያጭ ይመዝግቡ,dashboard.html,needs native review
+,{% if lang == 'am' %}ያልተረጋገጡ ክፍያዎች,dashboard.html,needs native review
+,{% if lang == 'am' %}ያልተከፈለ አጠቃላይ,dashboard.html,needs native review
+,የዛሬው የዕለታዊ ሂሳብ ማጠቃለያ ስራዎች በሙሉ ተጠናቀዋል።,dashboard.html,needs native review
+,{% if lang == 'am' %}አሳይ,login.html,needs native review
+,{% if lang == 'am' %}ኢሜይል ወይም ስልክ (+251...),login.html,needs native review
+,{% if lang == 'am' %}የይለፍ ቃል,login.html,needs native review
+,{% if lang == 'am' %}ግባ →,login.html,needs native review
+,ወደ አማርኛ ቀይር,login.html,needs native review
+,ዕለታዊ ሂሳብ ማጠቃለያ · ደህንነቱ የተጠበቀ መግቢያ,login.html,needs native review
+Forgot your password? Ask your business owner.,የይለፍ ቃልዎን ረሱ? የንግድዎን ባለቤት ይጠይቁ።,login.html,needs native review
+,({% if lang == 'am' %}እንደተቀማጭ ክሬዲት ይቀመጣል፤ ለሌላ ደረሰኝ አይውልም,review_queue.html,needs native review
+,{% if lang == 'am' %}ለጊዜው ይለፉ ↓,review_queue.html,needs native review
+,{% if lang == 'am' %}ማዛመጃ {{ loop.index }} ከ {{ proposed_items|length }},review_queue.html,needs native review
+,{% if lang == 'am' %}ቀጣይ,review_queue.html,needs native review
+,{% if lang == 'am' %}በባንክ መግለጫ ላይ የተገኘ,review_queue.html,needs native review
+,{% if lang == 'am' %}በክፍያ አቅራቢው የተረጋገጠ,review_queue.html,needs native review
+,{% if lang == 'am' %}በደንበኛው ማረጋገጫ ላይ የተመሰረተ,review_queue.html,needs native review
+,{% if lang == 'am' %}በደንበኛው በቀጥታ የተረጋገጠ,review_queue.html,needs native review
+,{% if lang == 'am' %}አትቀበል (ይህ አይደለም),review_queue.html,needs native review
+,{% if lang == 'am' %}ከዚህ በፊት የተሰረዘ ማዛመጃ,review_queue.html,needs native review
+,{% if lang == 'am' %}ክፍያ አረጋግጥ,review_queue.html,needs native review
+,{% if lang == 'am' %}የሚዛመድ ክፍት ደረሰኝ,review_queue.html,needs native review
+,{% if lang == 'am' %}የሚገመገሙ ክፍያዎች,review_queue.html,needs native review
+,{% if lang == 'am' %}የቅርብ ጊዜ ማዛመጃዎችን ይመልከቱ ↓,review_queue.html,needs native review
+,{% if lang == 'am' %}የተከፈለ ክፍያ,review_queue.html,needs native review
+,{% if lang == 'am' %}የክፍያ ማዛመጃዎች ግምገማ,review_queue.html,needs native review
+,{% if lang == 'am' %}ያልተረጋገጠ ብሎ መዝግብ (እንደተከፈለ አይቆጠርም),review_queue.html,needs native review
+,{% if lang == 'am' %}ያልተረጋገጠ የደረሰኝ ፎቶ / ስክሪንሾት (እንደተከፈለ አይቆጠርም),review_queue.html,needs native review
+,{% if lang == 'am' %}ይህ የተመረጠበት ምክንያት (ለምን አሰብን?)፡,review_queue.html,needs native review
+,ሁሉም የገቡ ክፍያዎች ተዛምደዋል ወይም ተረጋግጠዋል።,review_queue.html,needs native review
+,ሌሎች ክፍት ደረሰኞች ({{ item.alternative_candidates|length }}),review_queue.html,needs native review
+,ምንም የሚገመገም ክፍያ የለም!,review_queue.html,needs native review
+,ቀደም ሲል የተረጋገጠ ማዛመጃ መሰረዝ ይፈልጋሉ?,review_queue.html,needs native review
+,የባለቤት ብቻ ግምገማ። እባክዎ የቀረቡትን ክፍያዎች አንድ በአንድ ያረጋግጡ።,review_queue.html,needs native review
+,ደንበኛው {{ item.amount_etb }} ከፍሏል። የደረሰኝ ሂሳብ {{ item.invoice_amount_etb }} ነው። ልዩነቱ {{ item.diff_etb }} (በከፊል የተከፈለ፤ ቀሪው ደረሰኝ ላይ ይቆያል)።,review_queue.html,needs native review
+,ደንበኛው {{ item.amount_etb }} ከፍሏል። የደረሰኝ ሂሳብ {{ item.invoice_amount_etb }} ነው። ልዩነቱ {{ item.diff_etb }} (ትርፍ ክፍያ {{ item.unallocated_credit_etb }} እንደተቀማጭ ክሬዲት ይቀመጣል፤ ለሌላ ደረሰኝ አይውልም)።,review_queue.html,needs native review
+,ደንበኛው {{ item.amount_etb }} ከፍሏል። የደረሰኝ ሂሳብ {{ item.invoice_amount_etb }} ነው። ሙሉ በሙሉ ይዛመዳል — ምንም ልዩነት የለም።,review_queue.html,needs native review
+,← {% if lang == 'am' %}ቀዳሚ,review_queue.html,needs native review
+,🔒 {% if lang == 'am' %}የባለቤት ፍቃድ ያስፈልጋል,review_queue.html,needs native review

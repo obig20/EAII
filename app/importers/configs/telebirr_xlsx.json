@@ -1,0 +1,15 @@
+{
+  "source_name": "telebirr_xlsx",
+  "evidence_level": "L2",
+  "date_column": "Transaction Time",
+  "date_format": "%Y-%m-%d %H:%M:%S",
+  "amount_column": "Net Amount",
+  "polarity_column": "Type",
+  "credit_value": "Payment Received",
+  "reference_column": "Remarks",
+  "narrative_column": "Service Name",
+  "counterparty_name_column": "Sender Name",
+  "counterparty_account_column": "Sender Mobile",
+  "tx_id_column": "Receipt No",
+  "skip_rows": 0
+}

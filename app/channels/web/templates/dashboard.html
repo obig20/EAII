@@ -1,0 +1,426 @@
+{% extends "base.html" %}
+
+{% block title %}
+  {% if lang == 'am' %}ዳሽቦርድ — ዕለታዊ ሂሳብ ማጠቃለያ{% else %}Dashboard — Daily Close{% endif %}
+{% endblock %}
+
+{% block content %}
+<div style="display: flex; flex-direction: column; gap: 1.25rem;">
+
+  <!-- Alert Banner if gaps or flash messages -->
+  {% if message %}
+  <div style="padding: 0.85rem 1.15rem; border-radius: var(--radius-md); background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a; font-size: 0.875rem; font-weight: 600; display: flex; align-items: center; justify-content: space-between;">
+    <div>{{ message }}</div>
+  </div>
+  {% endif %}
+
+  <!-- TOP SUMMARY: 3 NUMBERS (No Decimals on Mobile) -->
+  <div class="kpi-row">
+    <div class="kpi-card">
+      <div class="kpi-label">
+        {% if lang == 'am' %}ያልተከፈለ አጠቃላይ <!-- needs native review -->{% else %}Total Unpaid{% endif %}
+      </div>
+      <div class="kpi-val">
+        {{ aging_report.grand_total_outstanding_santim | format_money }}
+      </div>
+      <div style="font-size: 0.75rem; color: var(--color-text-muted); margin-top: 0.25rem;">
+        {{ aging_report.retailers|length }} {% if lang == 'am' %}ደንበኞች{% else %}debtor accounts{% endif %}
+      </div>
+    </div>
+
+    <div class="kpi-card" style="border-color: var(--color-danger-border); background-color: var(--color-danger-bg);">
+      <div class="kpi-label" style="color: var(--color-danger);">
+        {% if lang == 'am' %}ቀኑ ያለፈበት <!-- needs native review -->{% else %}Overdue{% endif %}
+      </div>
+      <div class="kpi-val overdue">
+        {{ aging_report.grand_total_overdue_santim | format_money }}
+      </div>
+      <div style="font-size: 0.75rem; color: var(--color-danger); margin-top: 0.25rem;">
+        {% if aging_report.grand_total_overdue_santim > 0 %}
+          {% if lang == 'am' %}አስቸኳይ ስብስብ ያስፈልጋል{% else %}Urgent collection needed{% endif %}
+        {% else %}
+          {% if lang == 'am' %}ምንም ያለፈበት የለም{% else %}No overdue balances{% endif %}
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="kpi-card">
+      <div class="kpi-label" style="color: var(--color-primary);">
+        {% if lang == 'am' %}ያልተረጋገጡ ክፍያዎች <!-- needs native review -->{% else %}Pending Matches{% endif %}
+      </div>
+      <div id="kpi-review-queue" class="kpi-val pending">
+        {{ proposed_items|length }}
+      </div>
+      <div style="font-size: 0.75rem; color: var(--color-text-muted); margin-top: 0.25rem;">
+        {% if proposed_items %}
+          {% if lang == 'am' %}የባለቤት ማረጋገጫ ያስፈልጋል{% else %}Requires owner approval{% endif %}
+        {% else %}
+          {% if lang == 'am' %}ሁሉም ተረጋግጧል{% else %}All reconciled today{% endif %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ALL THREE TASKS COMPLETE BANNER (Shown strictly when all 3 are done today) -->
+  {% if all_tasks_complete %}
+  <div style="padding: 1rem 1.25rem; border-radius: var(--radius-lg); background-color: var(--color-success-bg); border: 2px solid var(--color-success-border); color: var(--color-success); font-weight: 700; display: flex; align-items: center; gap: 0.75rem;">
+    <svg class="icon" viewBox="0 0 24 24" style="width: 24px; height: 24px; flex-shrink: 0;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+    <div>
+      <div style="font-size: 0.9375rem;">
+        {% if lang == 'am' %}
+        የዛሬው የዕለታዊ ሂሳብ ማጠቃለያ ስራዎች በሙሉ ተጠናቀዋል። <!-- needs native review -->
+        {% else %}
+        All daily close tasks are complete for today. Debtor ledgers are up to date.
+        {% endif %}
+      </div>
+      <div style="font-size: 0.75rem; font-weight: 500; color: #166534; margin-top: 0.2rem;">
+        {% if lang == 'am' %}
+        ሽያጭ ተመዝግቧል፣ የባንክ መግለጫ ገብቷል፣ እና ሁሉም ክፍያዎች ተዛምደዋል።
+        {% else %}
+        Sales recorded, bank statement ingested, and all payment lines reconciled.
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- TODAY'S CHECKLIST: ONE-TAP ACTION CARDS (NO FORMS IN DEFAULT VIEW) -->
+  <div class="card" style="margin-bottom: 0;">
+    <div class="card-header">
+      <h2 class="card-title" style="display: flex; align-items: center; gap: 0.5rem;">
+        <svg class="icon" viewBox="0 0 24 24" style="color: var(--color-primary);"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L10 12.17l7.59-7.59L19 6l-9 11z"/></svg>
+        {% if lang == 'am' %}የዛሬው የሂሳብ ማጠቃለያ ስራዎች <!-- needs native review -->{% else %}Today's Reconciliation Tasks{% endif %}
+      </h2>
+      <span style="font-size: 0.75rem; color: var(--color-text-muted);">
+        {{ today_date.strftime('%d/%m/%Y') }}
+      </span>
+    </div>
+
+    <div class="card-body" style="padding: 1rem;">
+      
+      <!-- TASK 1: Record Credit Sales -->
+      <div class="task-card {% if today_sales_count > 0 %}complete{% else %}pending{% endif %}"
+           data-action="toggle-drawer" data-target="drawer-sales"
+           style="cursor: pointer;">
+        <div style="display: flex; align-items: center;">
+          <div class="task-number">1</div>
+          <div>
+            <div style="font-weight: 700; font-size: 0.9375rem;">
+              {% if lang == 'am' %}የዛሬውን የብድር ሽያጭ ይመዝግቡ <!-- needs native review -->{% else %}Record Today's Credit Sales{% endif %}
+            </div>
+            <div style="font-size: 0.75rem; color: var(--color-text-muted); margin-top: 0.15rem;">
+              {% if today_sales_count > 0 %}
+                <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px; color: var(--color-success); display: inline-block; vertical-align: middle;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg> {{ today_sales_count }}
+                {% if lang == 'am' %}
+                  {% if today_sales_count == 1 %}ደረሰኝ ዛሬ ተመዝግቧል{% else %}ደረሰኞች ዛሬ ተመዝግበዋል{% endif %} <!-- needs native review -->
+                {% else %}
+                  {% if today_sales_count == 1 %}invoice recorded today{% else %}invoices recorded today{% endif %}
+                {% endif %}
+              {% else %}
+                {% if lang == 'am' %}ዛሬ የተመዘገበ ሽያጭ የለም — ለመመዝገብ ይንኩ{% else %}No credit sales entered today — tap to record{% endif %}
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div style="color: var(--color-text-muted); font-size: 0.8125rem; font-weight: 700; display: flex; align-items: center; gap: 0.35rem;">
+          <span>{% if today_sales_count > 0 %}{% if lang == 'am' %}ተጨማሪ መዝግብ{% else %}Add More{% endif %}{% else %}{% if lang == 'am' %}መዝግብ{% else %}Open{% endif %}{% endif %}</span>
+          <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px;"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
+        </div>
+      </div>
+
+      <!-- Collapsible Drawer for Sales Entry -->
+      <div id="drawer-sales" style="display: none; background: #f8fafc; border: 1.5px solid var(--color-input-border); border-radius: var(--radius-md); padding: 1.25rem; margin-bottom: 1rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <h3 style="font-size: 0.9375rem; font-weight: 800;">
+            {% if lang == 'am' %}አዲስ የብድር ሽያጭ መመዝገቢያ{% else %}Record Single Credit Sale{% endif %}
+          </h3>
+          <button type="button" data-action="close-drawer" data-target="drawer-sales" style="background: transparent; border: none; font-size: 1.25rem; cursor: pointer; color: var(--color-text-muted);">&times;</button>
+        </div>
+
+        <form action="/sales" method="POST" id="sales-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          
+          <div style="display: grid; grid-template-columns: 1fr; gap: 0.75rem;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label">{% if lang == 'am' %}የደረሰኝ ቁጥር *{% else %}Invoice Number *{% endif %}</label>
+              <input type="text" name="invoice_number" required placeholder="e.g. INV-381" class="form-input">
+            </div>
+
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label">{% if lang == 'am' %}ደንበኛ *{% else %}Retailer *{% endif %}</label>
+              <select name="retailer_id" required class="form-select">
+                {% for r in retailers %}
+                <option value="{{ r.id }}">{{ r.name }} ({{ r.phone or 'No phone' }})</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">{% if lang == 'am' %}መጠን (ብር) *{% else %}Amount (ETB) *{% endif %}</label>
+                <input type="text" name="amount_etb" required placeholder="1250.00" class="form-input">
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">{% if lang == 'am' %}የመክፈያ ቀን *{% else %}Due Date *{% endif %}</label>
+                <input type="date" name="due_date" required value="{{ default_due_date.isoformat() }}" class="form-input">
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 0.5rem;">
+              {% if lang == 'am' %}የብድር ሽያጭ መዝግብ{% else %}Record Credit Sale{% endif %}
+            </button>
+          </div>
+        </form>
+
+        <!-- Bulk CSV Upload -->
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--color-border-subtle);">
+          <span style="font-size: 0.75rem; font-weight: 700; color: var(--color-text-muted); display: block; margin-bottom: 0.35rem;">
+            {% if lang == 'am' %}ወይም የሽያጭ CSV ፋይል ያስገቡ{% else %}Or Bulk Import Sales CSV{% endif %}
+          </span>
+          <form action="/sales/bulk" method="POST" enctype="multipart/form-data" style="display: flex; gap: 0.5rem; align-items: center;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="file" name="file" accept=".csv" required style="font-size: 0.75rem;">
+            <button type="submit" class="btn btn-secondary" style="min-height: 36px; padding: 0.35rem 0.75rem;">Upload</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- TASK 2: Upload Bank Statement -->
+      <div class="task-card {% if today_batches_count > 0 %}complete{% else %}pending{% endif %}"
+           data-action="toggle-drawer" data-target="drawer-statement"
+           style="cursor: pointer;">
+        <div style="display: flex; align-items: center;">
+          <div class="task-number">2</div>
+          <div>
+            <div style="font-weight: 700; font-size: 0.9375rem;">
+              {% if lang == 'am' %}የባንክ ወይም የቴሌብር መግለጫ ያስገቡ <!-- needs native review -->{% else %}Import Today's Statement{% endif %}
+            </div>
+            <div style="font-size: 0.75rem; color: var(--color-text-muted); margin-top: 0.15rem;">
+              {% if today_batches_count > 0 %}
+                <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px; color: var(--color-success); display: inline-block; vertical-align: middle;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg> {{ today_batches_count }}
+                {% if lang == 'am' %}
+                  {% if today_batches_count == 1 %}መግለጫ ዛሬ ገብቷል{% else %}መግለጫዎች ዛሬ ገብተዋል{% endif %} <!-- needs native review -->
+                {% else %}
+                  {% if today_batches_count == 1 %}statement batch imported today{% else %}statement batches imported today{% endif %}
+                {% endif %}
+              {% else %}
+                {% if lang == 'am' %}የCBE፣ ቴሌብር ወይም ዳሸን ፋይል ያስገቡ{% else %}Import CBE CSV, Telebirr XLSX, or Dashen CSV{% endif %}
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div style="color: var(--color-text-muted); font-size: 0.8125rem; font-weight: 700; display: flex; align-items: center; gap: 0.35rem;">
+          <span>{% if today_batches_count > 0 %}{% if lang == 'am' %}ተጨማሪ አስገባ{% else %}Upload More{% endif %}{% else %}{% if lang == 'am' %}አስገባ{% else %}Upload{% endif %}{% endif %}</span>
+          <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px;"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
+        </div>
+      </div>
+
+      <!-- Collapsible Drawer for Statement Import -->
+      <div id="drawer-statement" style="display: none; background: #f8fafc; border: 1.5px solid var(--color-input-border); border-radius: var(--radius-md); padding: 1.25rem; margin-bottom: 1rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <h3 style="font-size: 0.9375rem; font-weight: 800;">
+            {% if lang == 'am' %}የባንክ / ቴሌብር መግለጫ ማስገቢያ{% else %}Import Today's Statement{% endif %}
+          </h3>
+          <button type="button" data-action="close-drawer" data-target="drawer-statement" style="background: transparent; border: none; font-size: 1.25rem; cursor: pointer; color: var(--color-text-muted);">&times;</button>
+        </div>
+
+        <form action="/statements/upload" method="POST" enctype="multipart/form-data">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          
+          <div class="form-group">
+            <label class="form-label">{% if lang == 'am' %}የባንክ ምንጭ *{% else %}Bank / Wallet Source *{% endif %}</label>
+            <select name="source_name" class="form-select">
+              <option value="cbe_csv">Commercial Bank of Ethiopia (CBE) · CSV</option>
+              <option value="telebirr_xlsx">Telebirr Mobile Money · XLSX</option>
+              <option value="dashen_csv">Dashen Bank · CSV</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">{% if lang == 'am' %}የመግለጫ ፋይል (.csv ወይም .xlsx) *{% else %}Statement File (.csv or .xlsx) *{% endif %}</label>
+            <input type="file" name="file" accept=".csv,.xlsx" required class="form-input" style="padding: 0.45rem;">
+          </div>
+
+          <button type="submit" class="btn btn-primary" style="width: 100%;">
+            {% if lang == 'am' %}አስገባ እና ክፍያዎችን አዛምድ{% else %}Import Today's Statement & Run Auto-Matcher{% endif %}
+          </button>
+        </form>
+      </div>
+
+      <!-- TASK 3: Review Proposed Matches -->
+      <a href="#review-queue-section" class="task-card {% if proposed_items|length == 0 %}complete{% else %}pending{% endif %}">
+        <div style="display: flex; align-items: center;">
+          <div class="task-number">3</div>
+          <div>
+            <div style="font-weight: 700; font-size: 0.9375rem;">
+              {% if lang == 'am' %}የቀረቡ ክፍያዎችን ይገምግሙ <!-- needs native review -->{% else %}Approve Proposed Matches{% endif %}
+            </div>
+            <div style="font-size: 0.75rem; color: var(--color-text-muted); margin-top: 0.15rem;">
+              {% if proposed_items|length == 0 %}
+                <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px; color: var(--color-success); display: inline-block; vertical-align: middle;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg> {% if lang == 'am' %}ሁሉም ክፍያዎች ዛሬ ተረጋግጠዋል{% else %}All payments confirmed for today{% endif %}
+              {% else %}
+                <span id="step3-review-count" style="font-weight: 800; color: var(--color-primary);">{{ proposed_items|length }}</span>
+                {% if lang == 'am' %}
+                  {% if proposed_items|length == 1 %}የተጠቆመ ክፍያ የባለቤት ማረጋገጫ ይጠብቃል{% else %}የተጠቆሙ ክፍያዎች የባለቤት ማረጋገጫ ይጠብቃሉ{% endif %} <!-- needs native review -->
+                {% else %}
+                  {% if proposed_items|length == 1 %}suggested match awaiting review{% else %}suggested matches awaiting review{% endif %}
+                {% endif %}
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div style="color: var(--color-text-muted); font-size: 0.8125rem; font-weight: 700; display: flex; align-items: center; gap: 0.35rem;">
+          <span class="badge {% if proposed_items %}badge-warning{% else %}badge-success{% endif %}">
+            {{ proposed_items|length }}
+          </span>
+          <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px;"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
+        </div>
+      </a>
+
+    </div>
+  </div>
+
+  <!-- RECENTLY CONFIRMED MATCHES (DISCOVERABLE REVERSE LIST) -->
+  {% if recently_confirmed %}
+  <div class="card" style="margin-bottom: 0;">
+    <div class="card-header">
+      <h3 class="card-title" style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem;">
+        <svg class="icon" viewBox="0 0 24 24" style="color: var(--color-success);"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+        {% if lang == 'am' %}በቅርብ የተረጋገጡ ክፍያዎች (መመለሻ) <!-- needs native review -->{% else %}Recently Confirmed Matches{% endif %}
+      </h3>
+      <span style="font-size: 0.75rem; color: var(--color-text-muted);">
+        {% if user_role == 'owner' %}Owner Reversal Available{% endif %}
+      </span>
+    </div>
+    <div class="card-body" style="padding: 0;">
+      <div style="divide-y: 1px solid var(--color-border-subtle);">
+        {% for rc in recently_confirmed %}
+        <div style="padding: 0.85rem 1.25rem; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem; border-bottom: 1px solid var(--color-border-subtle);">
+          <div>
+            <div style="font-weight: 700; font-size: 0.875rem;">{{ rc.retailer_name }}</div>
+            <div style="font-size: 0.75rem; color: var(--color-text-muted);">
+              Invoice: <strong>{{ rc.invoice_number }}</strong> · Amount: <strong style="color: var(--color-primary);">{{ rc.matched_etb }}</strong> · {{ rc.confirmed_at }}
+            </div>
+          </div>
+          {% if user_role == 'owner' %}
+          <form method="POST" action="/matches/{{ rc.match_id }}/reverse" data-confirm="reverse-match">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="reason_code" value="wrong_invoice">
+            <button type="submit" class="btn btn-secondary" style="min-height: 36px; padding: 0.25rem 0.75rem; font-size: 0.75rem; color: var(--color-danger); border-color: var(--color-danger-border);">
+              <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle;"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg> Reverse Match
+            </button>
+          </form>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- REVIEW QUEUE SECTION -->
+  <section id="review-queue-section">
+    {% include "partials/review_queue.html" %}
+  </section>
+
+  <!-- NEEDS ATTENTION SECTION (REJECTED, UNMATCHED, ACCEPTED-UNVERIFIED, PREVIOUSLY REVERSED) -->
+  <section id="needs-attention-section">
+    <div class="card" style="margin-bottom: 0;">
+      <div class="card-header" style="flex-wrap: wrap; gap: 0.5rem; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <svg class="icon" viewBox="0 0 24 24" style="color: var(--color-warning); width: 20px; height: 20px;"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+          <h3 class="card-title" style="font-size: 0.9375rem;">
+            {% if lang == 'am' %}ትኩረት የሚሹ ክፍያዎች <!-- needs native review -->{% else %}Needs Attention{% endif %}
+          </h3>
+          <span class="badge {% if needs_attention_counts.total > 0 %}badge-warning{% else %}badge-neutral{% endif %}" data-testid="needs-attention-total-badge">
+            {{ needs_attention_counts.total }}
+          </span>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 0.35rem; font-size: 0.75rem;">
+          <span class="badge" style="background: #ffe4e6; color: #9f1239; border: 1px solid #fecdd3;" data-testid="needs-attention-rejected-badge">
+            {% if lang == 'am' %}ውድቅ የተደረጉ: <!-- needs native review -->{% else %}Rejected:{% endif %} {{ needs_attention_counts.rejected }}
+          </span>
+          <span class="badge" style="background: #fef3c7; color: #92400e; border: 1px solid #fde68a;" data-testid="needs-attention-unmatched-badge">
+            {% if lang == 'am' %}ያልተዛመዱ: <!-- needs native review -->{% else %}Unmatched:{% endif %} {{ needs_attention_counts.unmatched }}
+          </span>
+          <span class="badge" style="background: #f3e8ff; color: #6b21a8; border: 1px solid #e9d5ff;" data-testid="needs-attention-unverified-badge">
+            {% if lang == 'am' %}ያልተረጋገጡ: <!-- needs native review -->{% else %}Unverified:{% endif %} {{ needs_attention_counts.accepted_unverified }}
+          </span>
+          <span class="badge" style="background: #e0f2fe; color: #075985; border: 1px solid #bae6fd;" data-testid="needs-attention-reversed-badge">
+            {% if lang == 'am' %}የተመለሱ: <!-- needs native review -->{% else %}Reversed:{% endif %} {{ needs_attention_counts.previously_reversed }}
+          </span>
+        </div>
+      </div>
+
+      <div class="card-body" style="padding: 0;">
+        {% if needs_attention_items %}
+          <div style="divide-y: 1px solid var(--color-border-subtle);" data-testid="needs-attention-list">
+            {% for item in needs_attention_items %}
+            <div style="padding: 0.85rem 1.25rem; border-bottom: 1px solid var(--color-border-subtle); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.75rem;" data-testid="needs-attention-item-{{ item.id }}">
+              <div style="display: flex; flex-direction: column; gap: 0.2rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                  <strong style="font-size: 0.875rem;">{{ item.counterparty_name }}</strong>
+                  {% if item.is_rejected %}
+                    <span class="badge" style="background: #ffe4e6; color: #9f1239; font-size: 0.6875rem;">
+                      {% if lang == 'am' %}ውድቅ የተደረገ <!-- needs native review -->{% else %}Rejected Match{% endif %}
+                    </span>
+                  {% endif %}
+                  {% if item.is_unmatched %}
+                    <span class="badge" style="background: #fef3c7; color: #92400e; font-size: 0.6875rem;">
+                      {% if lang == 'am' %}ያልተዛመደ <!-- needs native review -->{% else %}Unmatched Payment{% endif %}
+                    </span>
+                  {% endif %}
+                  {% if item.is_accepted_unverified %}
+                    <span class="badge" style="background: #f3e8ff; color: #6b21a8; font-size: 0.6875rem;">
+                      {% if lang == 'am' %}ያልተረጋገጠ (L4) <!-- needs native review -->{% else %}Accepted Unverified (L4){% endif %}
+                    </span>
+                  {% endif %}
+                  {% if item.is_previously_reversed %}
+                    <span class="badge" style="background: #e0f2fe; color: #075985; font-size: 0.6875rem;">
+                      {% if lang == 'am' %}ቀደም ሲል የተመለሰ <!-- needs native review -->{% else %}Previously Reversed{% endif %}
+                    </span>
+                  {% endif %}
+                </div>
+                <div style="font-size: 0.75rem; color: var(--color-text-muted);">
+                  {% if lang == 'am' %}ማጣቀሻ: <!-- needs native review -->{% else %}Ref:{% endif %} <code>{{ item.raw_reference }}</code> · 
+                  {% if lang == 'am' %}ቀን: <!-- needs native review -->{% else %}Date:{% endif %} {{ item.value_date }}
+                </div>
+              </div>
+              <div style="text-align: right;">
+                <div style="font-weight: 800; font-size: 0.9375rem; color: var(--color-text-main);">
+                  {{ item.amount_etb }}
+                </div>
+                <div style="font-size: 0.6875rem; color: var(--color-text-muted);">
+                  {% if item.is_accepted_unverified %}
+                    {% if lang == 'am' %}ከሂሳብ አልተቀነሰም <!-- needs native review -->{% else %}Excluded from balances{% endif %}
+                  {% elif item.is_rejected %}
+                    {% if lang == 'am' %}በመዝገብ ውስጥ ተቀምጧል <!-- needs native review -->{% else %}Retained in records{% endif %}
+                  {% else %}
+                    {% if lang == 'am' %}እርምጃ ያስፈልጋል <!-- needs native review -->{% else %}Action required{% endif %}
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div style="padding: 1.5rem; text-align: center; color: var(--color-text-muted); font-size: 0.875rem;" data-testid="needs-attention-empty">
+            <svg class="icon" viewBox="0 0 24 24" style="width: 24px; height: 24px; color: var(--color-success); margin: 0 auto 0.5rem auto; display: block;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+            {% if lang == 'am' %}
+              በአሁኑ ጊዜ ትኩረት የሚሻ ምንም ክፍያ የለም። ሁሉም ክፍያዎች በመደበኛ ሂደት ላይ ናቸው። <!-- needs native review -->
+            {% else %}
+              No items currently require attention. All payments are in standard processing.
+            {% endif %}
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <!-- AGING REPORT SECTION -->
+  <section id="aging-section">
+    {% include "partials/aging_table.html" %}
+  </section>
+
+</div>
+{% endblock %}

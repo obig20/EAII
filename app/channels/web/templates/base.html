@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="{{ lang or 'en' }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Daily Close — Birana Technology{% endblock %}</title>
+  <!-- Local CSS and HTMX (No CDN, external fonts, scripts or analytics) -->
+  <meta name="htmx-config" content='{"allowEval":false,"includeIndicatorStyles":false}'>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/htmx.min.js"></script>
+  <script src="/static/app.js"></script>
+</head>
+<body class="{% if lang == 'am' %}amharic-text{% endif %}" hx-headers='{"x-csrf-token": "{{ csrf_token }}"}'>
+
+  {% if is_demo %}
+  <!-- Demo Mode Banner -->
+  <div class="demo-banner">
+    <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+      <span style="background: #0f172a; color: #fbbf24; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 800; text-transform: uppercase;">
+        {% if lang == 'am' %}የማሳያ ሁኔታ{% else %}Demo Mode{% endif %}
+      </span>
+      <span>
+        {% if lang == 'am' %}የአዲስ አበባ ጅምላ ንግድ ማሳያ — የማሳያ መረጃ ነው። ወደ ነበረበት ለመመለስ «መረጃ አድስ»ን ይጫኑ። <!-- needs native review -->{% else %}Addis Ababa Wholesale Demonstration — Demo data. Press Reset to restore it.{% endif %}
+      </span>
+    </div>
+    <form action="/demo/reset" method="POST" style="margin: 0;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" style="background: #0f172a; color: #fbbf24; border: 1px solid #1e293b; padding: 0.35rem 0.75rem; border-radius: 6px; font-weight: 800; font-size: 0.75rem; cursor: pointer; display: inline-flex; align-items: center; gap: 0.35rem;">
+        <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+        {% if lang == 'am' %}መረጃ አድስ{% else %}Reset Demo Data{% endif %}
+      </button>
+    </form>
+  </div>
+  {% endif %}
+
+  <!-- Top App Header -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="brand-wrapper">
+        <a href="/dashboard" style="text-decoration: none;">
+          <span class="brand-title">DAILY CLOSE</span>
+        </a>
+        <span class="brand-subtitle">
+          {% if lang == 'am' %}ዕለታዊ ሂሳብ ማጠቃለያ · ኢትዮጵያ (ETB){% else %}Ethiopia (ETB) · ዕለታዊ ሂሳብ ማጠቃለያ{% endif %}
+        </span>
+      </div>
+
+      <div class="header-nav">
+        <!-- Language Switcher -->
+        {% if lang == 'am' %}
+        <a href="/set-lang/en" class="lang-toggle" title="Switch to English">
+          English
+        </a>
+        {% else %}
+        <a href="/set-lang/am" class="lang-toggle" title="ወደ አማርኛ ቀይር">
+          አማርኛ
+        </a>
+        {% endif %}
+
+        {% if user_role %}
+        <span style="font-size: 0.8125rem; color: #cbd5e1;">
+          <strong style="color: #ffffff;">{{ tenant_name }}</strong>
+        </span>
+        
+        <span class="badge {% if user_role == 'owner' %}badge-warning{% else %}badge-info{% endif %}">
+          {% if user_role == 'owner' %}
+            {% if lang == 'am' %}ባለቤት{% else %}Owner{% endif %}
+          {% else %}
+            {% if lang == 'am' %}ካሸር{% else %}Cashier{% endif %}
+          {% endif %}
+        </span>
+
+        {% if user_role == 'owner' %}
+        <a href="/settings/users" class="lang-toggle" style="background: #1e293b; color: #e2e8f0;">
+          {% if lang == 'am' %}ተጠቃሚዎች{% else %}Users{% endif %}
+        </a>
+        {% endif %}
+
+        <a href="/brief" target="_blank" class="lang-toggle" style="background: #1e293b; color: #fbbf24;">
+          {% if lang == 'am' %}የጧት ማጠቃለያ{% else %}Morning Brief{% endif %}
+        </a>
+
+        <form method="POST" action="/logout" style="margin: 0; display: inline;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="lang-toggle" style="background: #450a0a; color: #fca5a5; border-color: #7f1d1d; cursor: pointer;">
+            {% if lang == 'am' %}ውጣ{% else %}Log out{% endif %}
+          </button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Body -->
+  <main class="app-main">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Toast Container (Aria-Live Polite, Dismissible, >= 10s Visible) -->
+  <div id="toast-container" aria-live="polite"></div>
+
+  <!-- App Footer -->
+  <footer style="background-color: #ffffff; border-top: 1px solid var(--color-border-subtle); padding: 1rem; text-align: center; font-size: 0.75rem; color: var(--color-text-muted); margin-top: auto;">
+    <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.75rem;">
+      <div>Daily Close &copy; 2026 Birana Technology, Addis Ababa.</div>
+      <div style="display: flex; gap: 1rem;">
+        <a href="/exports/sales.csv" style="color: var(--color-text-muted); text-decoration: underline;">Export Sales (CSV)</a>
+        <a href="/exports/payments.csv" style="color: var(--color-text-muted); text-decoration: underline;">Export Payments (CSV)</a>
+        <a href="/exports/accountant.csv" style="color: var(--color-primary); font-weight: 700; text-decoration: underline;">Accountant Export</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,2 @@
+-r base.txt
+# Production-only extras can go here (e.g. gunicorn, sentry-sdk if self-hosted)

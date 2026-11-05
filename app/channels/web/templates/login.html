@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}
+  {% if lang == 'am' %}ግባ — ዕለታዊ ሂሳብ ማጠቃለያ{% else %}Sign In — Daily Close{% endif %}
+{% endblock %}
+
+{% block content %}
+<div style="max-width: 420px; margin: 2rem auto; background: var(--color-surface); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg); box-shadow: 0 4px 12px rgba(0,0,0,0.08); overflow: hidden;">
+  
+  <div style="background-color: var(--color-header-bg); padding: 1.5rem; text-align: center; color: #ffffff;">
+    <div style="font-size: 1.5rem; font-weight: 900; color: #fbbf24;">DAILY CLOSE</div>
+    <div style="font-size: 0.8125rem; color: #94a3b8; margin-top: 0.25rem;">
+      {% if lang == 'am' %}
+      ዕለታዊ ሂሳብ ማጠቃለያ · ደህንነቱ የተጠበቀ መግቢያ <!-- needs native review -->
+      {% else %}
+      Secure Wholesale Collections Sign In
+      {% endif %}
+    </div>
+
+    <!-- Language Selector on Login Screen -->
+    <div style="margin-top: 0.75rem;">
+      {% if lang == 'am' %}
+      <a href="/set-lang/en" class="lang-toggle" style="background: #1e293b; color: #ffffff;">
+        Switch to English
+      </a>
+      {% else %}
+      <a href="/set-lang/am" class="lang-toggle" style="background: #1e293b; color: #ffffff;">
+        ወደ አማርኛ ቀይር <!-- needs native review -->
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div style="padding: 1.5rem;">
+    {% if error %}
+    <div style="margin-bottom: 1.25rem; padding: 0.75rem 1rem; border-radius: var(--radius-md); background-color: var(--color-danger-bg); border: 1px solid var(--color-danger-border); color: var(--color-danger); font-size: 0.8125rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem;">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+      <span>{{ error }}</span>
+    </div>
+    {% endif %}
+
+    <form method="POST" action="/login" style="display: flex; flex-direction: column; gap: 1rem;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+      <div class="form-group" style="margin-bottom: 0;">
+        <label for="identifier" class="form-label">
+          {% if lang == 'am' %}ኢሜይል ወይም ስልክ (+251...) <!-- needs native review -->{% else %}Email or Phone (+251...){% endif %}
+        </label>
+        <input
+          type="text"
+          id="identifier"
+          name="identifier"
+          required
+          autofocus
+          placeholder="e.g. owner@birana.et or +251911223344"
+          class="form-input"
+        >
+      </div>
+
+      <div class="form-group" style="margin-bottom: 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+          <label for="password" class="form-label" style="margin-bottom: 0;">
+            {% if lang == 'am' %}የይለፍ ቃል <!-- needs native review -->{% else %}Password{% endif %}
+          </label>
+          <button
+            type="button"
+            id="toggle-pwd-btn"
+            data-action="toggle-password"
+            data-target="password"
+            style="background: transparent; border: none; font-size: 0.75rem; color: var(--color-primary); font-weight: 700; cursor: pointer;">
+            {% if lang == 'am' %}አሳይ <!-- needs native review -->{% else %}Show{% endif %}
+          </button>
+        </div>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          required
+          placeholder="••••••••••••"
+          class="form-input"
+        >
+      </div>
+
+      <button
+        type="submit"
+        class="btn btn-primary"
+        style="width: 100%; margin-top: 0.5rem; display: flex; align-items: center; justify-content: center; gap: 0.4rem;">
+        <span>{% if lang == 'am' %}ግባ <!-- needs native review -->{% else %}Sign In{% endif %}</span>
+        <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px;"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+      </button>
+    </form>
+
+    <div style="margin-top: 1.5rem; pt-4; border-top: 1px solid var(--color-border-subtle); text-align: center; font-size: 0.8125rem; color: var(--color-text-muted); line-height: 1.5;">
+      {% if lang == 'am' %}
+      የይለፍ ቃልዎን ረሱ? የንግድዎን ባለቤት ይጠይቁ። <!-- needs native review -->
+      <br>
+      <span style="font-size: 0.75rem; color: #94a3b8;">መለያዎች የሚሰጡት በንግድ ባለቤቱ ብቻ ነው።</span>
+      {% else %}
+      Forgot your password? Ask your business owner.
+      <br>
+      <span style="font-size: 0.75rem; color: #94a3b8;">Staff accounts are provisioned exclusively by business owners.</span>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+{% endblock %}

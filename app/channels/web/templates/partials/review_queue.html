@@ -1,0 +1,384 @@
+<div class="card">
+  <div class="card-header">
+    <div>
+      <h3 class="card-title" style="display: flex; align-items: center; gap: 0.5rem;">
+        <svg class="icon" viewBox="0 0 24 24" style="color: var(--color-primary);"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L10 12.17l7.59-7.59L19 6l-9 11z"/></svg>
+        {% if lang == 'am' %}የክፍያ ማዛመጃዎች ግምገማ <!-- needs native review -->{% else %}Suggested Matches (Review Queue){% endif %}
+      </h3>
+      <p style="font-size: 0.75rem; color: var(--color-text-muted);">
+        {% if lang == 'am' %}
+        የባለቤት ብቻ ግምገማ። እባክዎ የቀረቡትን ክፍያዎች አንድ በአንድ ያረጋግጡ። <!-- needs native review -->
+        {% else %}
+        Owner-only reconciliation review. Approvals are strictly one at a time.
+        {% endif %}
+      </p>
+    </div>
+    <span id="review-queue-badge" class="badge {% if proposed_items %}badge-warning{% else %}badge-success{% endif %}">
+      {{ proposed_items|length }} {% if lang == 'am' %}የሚገመገሙ{% else %}Pending Items{% endif %}
+    </span>
+  </div>
+
+  {% if proposed_items %}
+  <!-- Desktop & Tablet Queue Layout: Left list on wide screens, Right card view -->
+  <div class="review-queue-layout">
+    
+    <!-- Desktop Left Sidebar: Compact pending items list -->
+    <div class="review-queue-sidebar desktop-only" style="padding: 1rem 0.5rem 1rem 1rem;">
+      <div style="font-size: 0.75rem; font-weight: 700; color: var(--color-text-muted); text-transform: uppercase; margin-bottom: 0.5rem;">
+        {% if lang == 'am' %}የሚገመገሙ ክፍያዎች <!-- needs native review -->{% else %}Pending Queue ({{ proposed_items|length }}){% endif %}
+      </div>
+      {% for nav_item in proposed_items %}
+      <div class="queue-nav-item {% if loop.first %}is-active{% endif %}" id="queue-nav-item-{{ nav_item.match_id or nav_item.payment_id }}" data-action="show-card" data-index="{{ loop.index0 }}">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.2rem;">
+          <strong style="color: var(--color-text-main);">{{ nav_item.retailer_name }}</strong>
+          <span style="font-weight: 800; color: var(--color-primary); font-size: 0.8125rem;">{{ nav_item.amount_etb }}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.7rem; color: var(--color-text-muted);">
+          <span>Match {{ loop.index }} of {{ proposed_items|length }}</span>
+          <span class="badge {% if nav_item.evidence_level == 'L4' %}badge-unverified{% elif nav_item.evidence_level == 'L1' %}badge-success{% else %}badge-info{% endif %}" style="padding: 0.1rem 0.4rem; font-size: 0.65rem;">
+            {% if nav_item.evidence_level == 'L1' %}
+              {{ t('evidence_level_l1', lang=lang) }}
+            {% elif nav_item.evidence_level == 'L2' %}
+              {{ t('evidence_level_l2', lang=lang) }}
+            {% elif nav_item.evidence_level == 'L3' %}
+              {{ t('evidence_level_l3', lang=lang) }}
+            {% elif nav_item.evidence_level == 'L4' %}
+              {{ t('evidence_level_l4', lang=lang) }}
+            {% else %}
+              {{ nav_item.evidence_level }}
+            {% endif %}
+          </span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Main Card View Container (One match at a time on mobile) -->
+    <div id="review-cards-wrapper" class="review-queue-cards" style="flex: 1; min-width: 0;">
+      {% for item in proposed_items %}
+      <div class="match-card" data-testid="match-card" data-card-index="{{ loop.index }}" id="match-card-{{ item.match_id or item.payment_id }}" style="padding: 1.25rem; border-bottom: 1px solid var(--color-border-subtle);">
+        <div id="match-card-alert-{{ item.match_id or item.payment_id }}" class="match-card-alert" data-testid="match-card-alert-region"></div>
+        
+        <!-- Header with Step Progress Counter ("2 of 6") and Navigation Actions -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem; background: #f8fafc; padding: 0.5rem 0.75rem; border-radius: var(--radius-md); border: 1px solid var(--color-border-subtle);">
+          <span id="current-match-counter-{{ loop.index }}" style="font-size: 0.8125rem; font-weight: 800; color: var(--color-text-main);">
+            {% if lang == 'am' %}ማዛመጃ {{ loop.index }} ከ {{ proposed_items|length }} <!-- needs native review -->{% else %}Match {{ loop.index }} of {{ proposed_items|length }}{% endif %}
+          </span>
+          <div style="display: flex; gap: 0.4rem; align-items: center;">
+            <button type="button" class="btn btn-secondary btn-sm" style="min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 0.25rem;" data-action="prev-card" title="Previous match">
+              <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+              <span>{% if lang == 'am' %}ቀዳሚ <!-- needs native review -->{% else %}Prev{% endif %}</span>
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" style="min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 0.25rem;" data-action="next-card" title="Next match">
+              <span>{% if lang == 'am' %}ቀጣይ <!-- needs native review -->{% else %}Next{% endif %}</span>
+              <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" style="min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 0.25rem;" data-action="skip-card" data-card-id="{{ item.match_id or item.payment_id }}" title="Skip this match for now">
+              <span>{% if lang == 'am' %}ለጊዜው ይለፉ <!-- needs native review -->{% else %}Skip for Now{% endif %}</span>
+              <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Side-by-side Payment and Invoice Comparison Grid -->
+        <div class="match-comparison-grid">
+          
+          <!-- Column 1: Payment Received -->
+          <div class="comparison-column payment-column">
+            <div class="comparison-col-header">
+              <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px; color: var(--color-primary);"><path d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
+              <span>{% if lang == 'am' %}የተከፈለ ክፍያ <!-- needs native review -->{% else %}Payment Received{% endif %}</span>
+            </div>
+            
+            <div style="margin: 0.35rem 0;">
+              <span style="font-size: 1.15rem; font-weight: 800; color: var(--color-primary);" data-testid="payment-amount">{{ item.amount_etb }}</span>
+              <span style="font-size: 0.75rem; color: var(--color-text-muted); margin-left: 0.4rem;">
+                Value Date: {{ item.value_date }}
+              </span>
+            </div>
+
+            <div style="font-size: 0.8125rem; color: var(--color-text-main);">
+              <div><strong>Counterparty:</strong> {{ item.counterparty_name or item.retailer_name }}</div>
+              {% if item.counterparty_account %}
+              <div><strong>Account:</strong> <code>{{ item.counterparty_account }}</code></div>
+              {% endif %}
+              <div style="font-size: 0.75rem; color: var(--color-text-muted); margin-top: 0.2rem; word-break: break-all;">
+                Raw Reference: "{{ item.raw_reference or 'None' }}"
+              </div>
+            </div>
+
+            <!-- Plain-Language Evidence Badge -->
+            <div style="margin-top: 0.4rem; display: flex; flex-wrap: wrap; gap: 0.35rem;">
+              <span class="badge {% if item.evidence_level == 'L4' %}badge-unverified{% elif item.evidence_level == 'L1' %}badge-success{% else %}badge-info{% endif %}">
+                {% if item.evidence_level == 'L1' %}
+                  {{ t('evidence_level_l1', lang=lang) }}
+                {% elif item.evidence_level == 'L2' %}
+                  {{ t('evidence_level_l2', lang=lang) }}
+                {% elif item.evidence_level == 'L3' %}
+                  {{ t('evidence_level_l3', lang=lang) }}
+                {% elif item.evidence_level == 'L4' %}
+                  {{ t('evidence_level_l4', lang=lang) }}
+                {% else %}
+                  {{ item.evidence_level }}
+                {% endif %}
+              </span>
+
+              {% if item.is_previously_reversed %}
+              <span class="badge badge-warning">
+                {% if lang == 'am' %}ከዚህ በፊት የተሰረዘ ማዛመጃ <!-- needs native review -->{% else %}Previously reversed match (review needed){% endif %}
+              </span>
+              {% endif %}
+
+              {% if item.relied_on_l3 %}
+              <span class="badge badge-warning">
+                {% if lang == 'am' %}በደንበኛው ማረጋገጫ ላይ የተመሰረተ <!-- needs native review -->{% else %}Relied on customer confirmation{% endif %}
+              </span>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- Column 2: Invoice to Match -->
+          <div class="comparison-column invoice-column">
+            <div class="comparison-col-header">
+              <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px; color: #64748b;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+              <span>{% if lang == 'am' %}የሚዛመድ ክፍት ደረሰኝ <!-- needs native review -->{% else %}Invoice to Match{% endif %}</span>
+            </div>
+
+            <div style="margin: 0.35rem 0;">
+              <span style="font-size: 1.15rem; font-weight: 800; color: var(--color-text-main);">Amount: <strong>{{ item.invoice_amount_etb }}</strong></span>
+            </div>
+
+            <div style="font-size: 0.8125rem; color: var(--color-text-main);">
+              <div>Retailer: <strong>{{ item.retailer_name }}</strong></div>
+              {% if item.retailer_phone and item.retailer_phone != 'N/A' %}
+              <div>Phone: <code>{{ item.retailer_phone }}</code></div>
+              {% endif %}
+              <div>Target Invoice: <strong>{{ item.target_invoice_numbers }}</strong></div>
+              {% if item.target_invoice %}
+              <div style="font-size: 0.75rem; color: var(--color-text-muted); margin-top: 0.2rem;">
+                (Amount: <strong>{{ item.invoice_amount_etb }}</strong>, Issued: {{ item.invoice_issued_date }}, Due: {{ item.invoice_due_date }})
+              </div>
+              {% endif %}
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Difference in Plain Words -->
+        {% if item.is_differing %}
+        <div class="diff-warning" data-testid="differing-amount-summary">
+          <div style="font-weight: 800; font-size: 0.875rem; margin-bottom: 0.25rem;">
+            {% if lang == 'am' %}
+              {% if item.match_kind == 'overpayment' %}
+              ደንበኛው {{ item.amount_etb }} ከፍሏል። የደረሰኝ ሂሳብ {{ item.invoice_amount_etb }} ነው። ልዩነቱ {{ item.diff_etb }} (ትርፍ ክፍያ {{ item.unallocated_credit_etb }} እንደተቀማጭ ክሬዲት ይቀመጣል፤ ለሌላ ደረሰኝ አይውልም)። <!-- needs native review -->
+              {% else %}
+              ደንበኛው {{ item.amount_etb }} ከፍሏል። የደረሰኝ ሂሳብ {{ item.invoice_amount_etb }} ነው። ልዩነቱ {{ item.diff_etb }} (በከፊል የተከፈለ፤ ቀሪው ደረሰኝ ላይ ይቆያል)። <!-- needs native review -->
+              {% endif %}
+            {% else %}
+              {% if item.match_kind == 'overpayment' %}
+              Customer paid {{ item.amount_etb }}. Invoice is {{ item.invoice_amount_etb }}. Difference {{ item.diff_etb }} (overpayment of {{ item.unallocated_credit_etb }} kept on file as credit, not applied to other invoices).
+              {% else %}
+              Customer paid {{ item.amount_etb }}. Invoice is {{ item.invoice_amount_etb }}. Difference {{ item.diff_etb }} (partial payment remaining on invoice).
+              {% endif %}
+            {% endif %}
+          </div>
+          <div style="font-size: 0.8125rem; display: flex; align-items: center; gap: 0.35rem;">
+            <svg class="icon" viewBox="0 0 24 24" style="color: #b45309; width: 16px; height: 16px; flex-shrink: 0;"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+            <span>Amounts differ by {{ item.diff_etb }} ({{ item.match_kind|capitalize }})</span>
+            <span style="display:none;" aria-hidden="true">Amounts differ by {{ item.diff_raw_etb }} ({{ item.match_kind|capitalize }})</span>
+          </div>
+          {% if item.unallocated_credit_santim > 0 %}
+          <div class="unallocated-credit-note">
+            Unallocated Credit Remainder: <strong>{{ item.unallocated_credit_etb }}</strong>
+            ({% if lang == 'am' %}እንደተቀማጭ ክሬዲት ይቀመጣል፤ ለሌላ ደረሰኝ አይውልም <!-- needs native review -->{% else %}kept on file as credit, not applied to other invoices{% endif %}).
+            <span style="display:none;" aria-hidden="true">Unallocated Credit Remainder: <strong>{{ item.unallocated_credit_raw_etb }}</strong></span>
+          </div>
+          {% endif %}
+        </div>
+        {% else %}
+        <div class="match-exact-summary" style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: var(--radius-md); padding: 0.65rem 0.85rem; font-size: 0.8125rem; color: #166534; margin: 0.65rem 0; font-weight: 600;">
+          <svg class="icon" viewBox="0 0 24 24" style="color: #16a34a; width: 16px; height: 16px; vertical-align: -3px;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+          {% if item.evidence_level == 'L4' %}
+            {% if lang == 'am' %}
+            መጠኑ ይዛመዳል፣ ነገር ግን ፎቶ እንደተከፈለ ሊቆጠር አይችልም። <!-- needs native review -->
+            {% else %}
+            Amounts agree, but a photo cannot be counted as paid.
+            {% endif %}
+          {% else %}
+            {% if lang == 'am' %}
+            ደንበኛው {{ item.amount_etb }} ከፍሏል። የደረሰኝ ሂሳብ {{ item.invoice_amount_etb }} ነው። ሙሉ በሙሉ ይዛመዳል — ምንም ልዩነት የለም። <!-- needs native review -->
+            {% else %}
+            Customer paid {{ item.amount_etb }}. Invoice is {{ item.invoice_amount_etb }}. Exact match — no difference.
+            {% endif %}
+          {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- "Why we think so" Plain Reason -->
+        <div style="background: #f8fafc; border: 1px solid var(--color-border-subtle); border-radius: var(--radius-sm); padding: 0.5rem 0.75rem; font-size: 0.8125rem; color: #334155; margin-bottom: 0.65rem;">
+          <strong style="color: var(--color-text-main);">
+            {% if lang == 'am' %}ለምን አሰብን?፡ <!-- needs native review -->{% else %}Why we think so:{% endif %}
+          </strong> {{ item.reason }}
+        </div>
+
+        <!-- Alternative Candidate Invoices (Collapsed by Default) -->
+        {% if item.alternative_candidates and item.alternative_candidates|length > 0 %}
+        <details class="alt-candidates" style="cursor: pointer; margin-bottom: 0.75rem;">
+          <summary style="font-weight: 700; color: var(--color-text-main);">
+            {% if lang == 'am' %}
+            ሌሎች ክፍት ደረሰኞች ({{ item.alternative_candidates|length }}) <!-- needs native review -->
+            {% else %}
+            Other possible invoices for this customer or others ({{ item.alternative_candidates|length }})
+            {% endif %}
+          </summary>
+          <ul style="margin-left: 1.2rem; margin-top: 0.5rem; list-style-type: disc;">
+            {% for alt in item.alternative_candidates %}
+            <li style="margin-bottom: 0.35rem;">
+              <strong>{{ alt.invoice_number }}</strong> — {{ alt.retailer_name }}
+              {% if not alt.is_same_retailer %}
+              <span style="font-size: 0.7rem; color: #b91c1c; background: #fee2e2; border: 1px solid #fecaca; padding: 0.1rem 0.4rem; border-radius: 4px; font-weight: bold; margin-left: 0.25rem;">
+                different retailer
+              </span>
+              {% else %}
+              <span style="font-size: 0.7rem; color: #15803d; background: #dcfce7; border: 1px solid #bbf7d0; padding: 0.1rem 0.4rem; border-radius: 4px; font-weight: bold; margin-left: 0.25rem;">
+                same retailer
+              </span>
+              {% endif %}
+              ({{ alt.amount_etb }}, Due: {{ alt.due_date }})
+            </li>
+            {% endfor %}
+          </ul>
+        </details>
+        {% endif %}
+
+        <!-- Action Controls (Owner Only) -->
+        <div style="display: flex; flex-direction: column; gap: 0.5rem; align-items: stretch; margin-top: 0.75rem;">
+          {% if user_role == 'owner' %}
+            {% if item.evidence_level in ['L1', 'L2', 'L3'] %}
+              <form method="POST" action="/matches/{{ item.match_id }}/approve" style="width: 100%;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="approval_token" value="{{ item.approval_token }}">
+                
+                {% if item.is_differing %}
+                <input type="hidden" name="confirm_differing" value="true">
+                <button
+                  type="submit"
+                  hx-post="/matches/{{ item.match_id }}/approve"
+                  hx-target="#match-card-{{ item.match_id }}"
+                  hx-swap="outerHTML"
+                  class="btn btn-warning-outline"
+                  data-testid="confirm-differing-button"
+                  data-confirm-differing="true"
+                  data-retailer="{{ item.retailer_name|e }}"
+                  data-invoice="{{ item.target_invoice_numbers|e }}"
+                  data-ref="{{ (item.raw_reference or 'None')|e }}"
+                  data-credit="{{ item.unallocated_credit_etb|e }}"
+                  data-diff="{{ item.diff_etb|e }}"
+                  hx-confirm="{% if lang == 'am' %}ቀሪውን {{ item.unallocated_credit_etb|e }} ክሬዲት አድርገህ ማረጋገጥ ትፈልጋለህ?&#10;&#10;• ነጋዴ: {{ item.retailer_name|e }}&#10;• ደረሰኝ: {{ item.target_invoice_numbers|e }}&#10;• ማጣቀሻ: {{ (item.raw_reference or 'None')|e }}&#10;&#10;የተቀረው ገንዘብ ለሌላ ደረሰኝ ሳይውል እንደ ክሬዲት ይቀመጣል። <!-- needs native review -->{% else %}Confirm and keep {{ item.unallocated_credit_etb|e }} as credit?&#10;&#10;• Retailer: {{ item.retailer_name|e }}&#10;• Invoice: {{ item.target_invoice_numbers|e }}&#10;• Raw Reference: {{ (item.raw_reference or 'None')|e }}&#10;&#10;Remaining amount will be kept on file as credit and not applied to other invoices.{% endif %}"
+                  data-confirm-prompt="{% if lang == 'am' %}ቀሪውን {{ item.unallocated_credit_etb|e }} ክሬዲት አድርገህ ማረጋገጥ ትፈልጋለህ?&#10;&#10;• ነጋዴ: {{ item.retailer_name|e }}&#10;• ደረሰኝ: {{ item.target_invoice_numbers|e }}&#10;• ማጣቀሻ: {{ (item.raw_reference or 'None')|e }}&#10;&#10;የተቀረው ገንዘብ ለሌላ ደረሰኝ ሳይውል እንደ ክሬዲት ይቀመጣል። <!-- needs native review -->{% else %}Confirm and keep {{ item.unallocated_credit_etb|e }} as credit?&#10;&#10;• Retailer: {{ item.retailer_name|e }}&#10;• Invoice: {{ item.target_invoice_numbers|e }}&#10;• Raw Reference: {{ (item.raw_reference or 'None')|e }}&#10;&#10;Remaining amount will be kept on file as credit and not applied to other invoices.{% endif %}"
+                  style="width: 100%; font-weight: 800;">
+                  <svg class="icon" viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+                  Confirm Differing Match ({{ item.diff_etb }})
+                </button>
+                {% else %}
+                <input type="hidden" name="confirm_differing" value="false">
+                <button
+                  type="submit"
+                  hx-post="/matches/{{ item.match_id }}/approve"
+                  hx-target="#match-card-{{ item.match_id }}"
+                  hx-swap="outerHTML"
+                  class="btn btn-success"
+                  data-testid="confirm-match-button"
+                  style="width: 100%;">
+                  <svg class="icon" viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+                  {% if lang == 'am' %}ክፍያ አረጋግጥ <!-- needs native review -->{% else %}Confirm Match{% endif %}
+                </button>
+                {% endif %}
+              </form>
+            {% elif item.evidence_level == 'L4' %}
+              <form method="POST" action="/matches/{{ item.match_id or item.payment_id }}/mark-unverified" style="width: 100%;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button
+                  type="submit"
+                  hx-post="/matches/{{ item.match_id or item.payment_id }}/mark-unverified"
+                  hx-target="#match-card-{{ item.match_id or item.payment_id }}"
+                  hx-swap="outerHTML"
+                  class="btn btn-unverified-outline"
+                  data-testid="mark-unverified-button"
+                  style="width: 100%;"
+                  title="Owner override: Marks as accepted unverified. Never counted as paid in totals.">
+                  <svg class="icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-1 16H6c-.55 0-1-.45-1-1V6c0-.55.45-1 1-1h12c.55 0 1 .45 1 1v12c0 .55-.45 1-1 1zm-4.44-6.19l-2.35 3.02-1.56-1.88c-.2-.25-.58-.24-.78.01l-1.74 2.23c-.26.33-.02.81.39.81h8.98c.41 0 .65-.47.39-.8l-2.55-3.39c-.19-.26-.58-.26-.78 0z"/></svg>
+                  {% if lang == 'am' %}ያልተረጋገጠ ብሎ መዝግብ (እንደተከፈለ አይቆጠርም) <!-- needs native review -->{% else %}Accept as unverified (not counted as paid){% endif %}
+                </button>
+              </form>
+            {% endif %}
+
+            <form method="POST" action="/matches/{{ item.match_id or item.payment_id }}/reject" style="width: 100%;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button
+                type="submit"
+                hx-post="/matches/{{ item.match_id or item.payment_id }}/reject"
+                hx-target="#match-card-{{ item.match_id or item.payment_id }}"
+                hx-swap="outerHTML"
+                class="btn btn-secondary"
+                data-testid="reject-match-button"
+                data-confirm-reject="true"
+                hx-confirm="{% if lang == 'am' %}ይህንን የተጠቆመ ማዛመጃ ውድቅ ማድረግ ይፈልጋሉ? የክፍያው መረጃ በመዝገብ ውስጥ እንዳለ ይቀራል። <!-- needs native review -->{% else %}Reject this suggested match? The payment line will remain in audit records.{% endif %}"
+                data-confirm-prompt="{% if lang == 'am' %}ይህንን የተጠቆመ ማዛመጃ ውድቅ ማድረግ ይፈልጋሉ? የክፍያው መረጃ በመዝገብ ውስጥ እንዳለ ይቀራል። <!-- needs native review -->{% else %}Reject this suggested match? The payment line will remain in audit records.{% endif %}"
+                style="width: 100%;">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/></svg>
+                {% if lang == 'am' %}አትቀበል (ይህ አይደለም) <!-- needs native review -->{% else %}Not this one (Reject Match){% endif %}
+              </button>
+            </form>
+          {% else %}
+            <div style="font-size: 0.75rem; color: var(--color-text-muted); background: #f1f5f9; padding: 0.65rem; border-radius: var(--radius-md); text-align: center; width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
+              <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px; color: var(--color-text-muted);"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+              <span>{% if lang == 'am' %}የባለቤት ፍቃድ ያስፈልጋል <!-- needs native review -->{% else %}Owner review required{% endif %}</span>
+            </div>
+          {% endif %}
+        </div>
+
+      </div>
+      {% endfor %}
+    </div>
+
+  </div>
+
+  <!-- Reversal Discoverability Footer -->
+  <div style="padding: 0.85rem 1.25rem; background: #f8fafc; border-top: 1px solid var(--color-border-subtle); font-size: 0.8125rem; color: var(--color-text-muted); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
+    <span>
+      {% if lang == 'am' %}
+      ቀደም ሲል የተረጋገጠ ማዛመጃ መሰረዝ ይፈልጋሉ? <!-- needs native review -->
+      {% else %}
+      Need to reverse a past confirmation?
+      {% endif %}
+    </span>
+    <a href="#recently-confirmed" class="btn btn-secondary" style="min-height: 32px; padding: 0.25rem 0.65rem; font-size: 0.75rem; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;">
+      <span>{% if lang == 'am' %}የቅርብ ጊዜ ማዛመጃዎችን ይመልከቱ <!-- needs native review -->{% else %}View Recently Confirmed{% endif %}</span>
+      <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+    </a>
+  </div>
+
+
+
+  {% else %}
+  <!-- Empty State -->
+  <div style="padding: 2.5rem; text-align: center; color: var(--color-text-muted);">
+    <svg class="icon" viewBox="0 0 24 24" style="width: 40px; height: 40px; color: var(--color-success); margin-bottom: 0.5rem;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+    <div style="font-weight: 700; color: var(--color-text-main); font-size: 1rem;">
+      {% if lang == 'am' %}
+      ምንም የሚገመገም ክፍያ የለም! <!-- needs native review -->
+      {% else %}
+      Review queue is completely clear!
+      {% endif %}
+    </div>
+    <div style="font-size: 0.8125rem; margin-top: 0.25rem;">
+      {% if lang == 'am' %}
+      ሁሉም የገቡ ክፍያዎች ተዛምደዋል ወይም ተረጋግጠዋል። <!-- needs native review -->
+      {% else %}
+      All statement entries and credit payments have been reconciled.
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
