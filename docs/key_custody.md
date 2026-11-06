@@ -74,7 +74,7 @@ In the event of database corruption, ransomware, or server rebuild:
 
 ## 5. Maintenance & Annual Review
 
-- **Semi-Annual Restore Drill:** Every six months, `[FOUNDER_NAME]` performs a test restoration on a local scratch database to verify that the private key successfully decrypts current nightly backups.
+- **Semi-Annual Restore Drill:** Procedure: Once operational, `[FOUNDER_NAME]` is scheduled to perform a test restoration on a local scratch database every six months to verify that the private key successfully decrypts current nightly backups.
 - **Key Rotation:** The keypair is rotated every 12 months, or immediately upon suspicion of compromise. Archived private keys must be preserved offline for historical backup decryption as required by Ethiopian tax and accounting record-retention laws (typically 5 to 7 years).
 
 ---

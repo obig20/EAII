@@ -1,7 +1,12 @@
-# Wholesale Merchant Data Consent & Retailer Privacy Notice
+# DRAFT TEMPLATE. Not reviewed by a lawyer. Not executed.
+
+> [!WARNING]
+> **DRAFT TEMPLATE. Not reviewed by a lawyer. Not executed.**
+> This document is a preliminary internal template for pilot preparation. It has not undergone legal review, has not been executed by any merchant, and does not represent an active or binding legal agreement.
+
+# Wholesale Merchant Data Consent & Retailer Privacy Notice (Template)
 **Daily Close (ዕለታዊ ሂሳብ ማጠቃለያ) — Birana Technology, Addis Ababa, Ethiopia**  
-*Document Version:* 1.0.0 | *Effective Date:* October 2026  
-*Status:* **Approved — Gate 7 Passed & Verified**
+*Document Version:* 0.1.0-draft | *Status:* **DRAFT ONLY — UNEXECUTED**
 
 ---
 
@@ -19,8 +24,8 @@
 - **Amharic:** ተሳታፊው የጅምላ ነጋዴ የብድር ሽያጭ ደረሰኞችን፣ የደንበኛ ቸርቻሪዎችን አድራሻ እና የባንክ/ቴሌብር ገቢ ሂሳብ መግለጫዎችን በዕለታዊ ሂሳብ ማጠቃለያ (Daily Close) መተግበሪያ አማካኝነት የሂሳብ ማስታረቅ፣ የክፍያ ማረጋገጫ እና የዕለታዊ ማጠቃለያ ሪፖርት ለማዘጋጀት ብቻ ውሂቡን እንዲጠቀም ለቢራና ቴክኖሎጂ ፈቃድ ሰጥቷል።
 
 ### 2. Proprietary Ownership & Data Sovereignty (የባለቤትነት መብት እና የውሂብ ሉዓላዊነት)
-- **English:** All customer lists, credit balances, sales records, and financial statements remain the exclusive proprietary property of the Wholesaler. Birana shall never sell, monetize, disclose, or transfer any merchant data to third parties, credit bureaus, or advertising networks. All data is hosted exclusively on sovereign Tier III infrastructure within Ethiopia (Rule 7).
-- **Amharic:** ሁሉም የደንበኞች ዝርዝር፣ ያልተከፈለ የብድር ቀሪ፣ የሽያጭ መረጃ እና የባንክ መግለጫዎች የጅምላ ነጋዴው ብቸኛ ንብረት ሆነው ይቀጥላሉ። ቢራና የነጋዴውን ውሂብ ለማንኛውም ሶስተኛ ወገን፣ የብድር መረጃ ቢሮ ወይም ለማስታወቂያ አያስተላልፍም አይሸጥምም። ሁሉም መረጃዎች በኢትዮጵያ ውስጥ ባሉ ደረጃቸውን የጠበቁ ዳታ ማዕከላት (Rule 7) ብቻ ይቀመጣሉ።
+- **English:** All customer lists, credit balances, sales records, and financial statements remain the exclusive proprietary property of the Wholesaler. Birana shall never sell, monetize, disclose, or transfer any merchant data to third parties, credit bureaus, or advertising networks. All data will be hosted on server infrastructure within Ethiopia (Rule 7; location to be confirmed before launch).
+- **Amharic:** ሁሉም የደንበኞች ዝርዝር፣ ያልተከፈለ የብድር ቀሪ፣ የሽያጭ መረጃ እና የባንክ መግለጫዎች የጅምላ ነጋዴው ብቸኛ ንብረት ሆነው ይቀጥላሉ። ቢራና የነጋዴውን ውሂብ ለማንኛውም ሶስተኛ ወገን፣ የብድር መረጃ ቢሮ ወይም ለማስታወቂያ አያስተላልፍም አይሸጥምም። ሁሉም መረጃዎች በኢትዮጵያ ውስጥ በሚገኝ ሰርቨር (Rule 7) ብቻ ይቀመጣሉ።
 
 ### 3. Read-Only Banking Statement Ingestion (የባንክ መግለጫ አያያዝ ወሰን)
 - **English:** Statement ingestion is strictly read-only and restricted to inward credit deposits. Daily Close never requests, stores, or utilizes banking transaction PINs, online banking withdrawal passwords, or payment authorization tokens.

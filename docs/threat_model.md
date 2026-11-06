@@ -82,7 +82,7 @@ Daily Close provides Ethiopian wholesalers and distributors with daily accounts 
 * **Threat 7: PII & Financial Leakage in Server Logs:** Financial amounts or phone numbers exposed in log files.
   * *Mitigation (Rule 9 — Redaction Policy):* Logging amounts or customer PII is forbidden above `DEBUG` level. Production runs strictly at `INFO` level.
 * **Threat 8: Cross-Border Data Residency Violations:** Data exported to overseas cloud services (AWS, Azure, analytics SDKs).
-  * *Mitigation (Rule 7 — Sovereign Hosting):* Single server running inside Ethiopia. Zero external telemetry, crash reporters, or third-party fonts/analytics.
+  * *Mitigation (Rule 7 — Sovereign Hosting):* Designed to run on a single host without external telemetry, crash reporters, or third-party fonts/analytics.
 
 ### 3.5 Denial of Service (Availability)
 * **Threat 9: XLSX Zip Bomb / Memory Exhaustion:** Attacker uploads a 1KB zip archive that decompresses into 50GB of XML, crashing the server.

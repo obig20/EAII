@@ -1,18 +1,18 @@
 # Pilot Readiness & Operational Status
 **Daily Close (ዕለታዊ ሂሳብ ማጠቃለያ) — Birana Technology, Addis Ababa, Ethiopia**  
-*Document Version:* 2.0.0 | *Date:* October 27, 2026 (Updated November 2026)  
-*Status:* **All 7 Pilot Gates Completed & Verified — Production Pilot Ready**
+*Document Version:* 1.0.0 | *Date:* October 27, 2026  
+*Status:* **Ready for demos and interviews; pilot gates not yet complete.**
 
 ---
 
 ## 1. Readiness Executive Summary
 
-The Daily Close accounts receivable tracking and daily settlement reconciliation platform has successfully reached full **Pilot Operational Readiness**.
+The Daily Close accounts receivable tracking and daily settlement reconciliation platform has successfully reached the **Demo and Interview Readiness** milestone (Git Tag `v0.2-interview-ready`). 
 
 > [!IMPORTANT]
 > **Operational Status:**  
-> **All 7 Pilot Readiness Gates Completed & Verified.**  
-> Core application functionality, adversarial safety controls, sovereign data residency, real consented statement ingestion, HTTPS/HSTS transport security, disaster recovery drills, regulatory determinations, and bilingual merchant consent agreements have all been executed, tested, and verified with 100% test suite pass rate under the unprivileged `app` role.
+> **Ready for demos and interviews; pilot gates not yet complete.**  
+> While all core application functionality, adversarial safety guards, demo mode data generators, and diagnostic health-check CLI tools are fully verified and passing 100% of the automated test suite under the unprivileged `app` role, live production deployment to pilot wholesalers remains subject to the completion of formal pilot operational gates described in Section 4.
 
 ---
 
@@ -59,19 +59,19 @@ All original 13 security findings from the independent adversarial review, plus 
 
 ---
 
-## 4. Pilot Operational Gates Verification & Sign-Off
+## 4. Pending Gates Before Live Pilot Deployment
 
-All seven (7) prerequisite operational readiness gates have been fully executed, verified, and signed off:
+Live pilot deployment with consenting wholesale merchants is subject to completion of the following prerequisite gates. Each gate is currently marked **NOT DONE**:
 
-| Pilot Gate Item | Requirement & Deliverables | Verification Test / Evidence | Final Status |
-| :--- | :--- | :--- | :---: |
-| **1. Hold-Out Accuracy Gate** | Multi-seed hold-out evaluation demonstrating exactly zero false confirmations (0.00% false confirmation rate) across 20 random seeds (5,500 total payments). | `tests/adversarial/test_benchmark_audit.py` (0 false confirmations across all 20 runs; coverage 97.8%–100.0%; Top-1 rate 86.0%–96.3%) | **COMPLETED & VERIFIED** |
-| **2. Consented Real Statements Gate** | Live ingestion, integer santim conversion (Rule 1), polarity filtering, and deterministic matching of real statement exports from CBE, Telebirr, and Dashen Bank. | `tests/importers/test_real_consented_statements.py` using `tests/fixtures/real_statements/` (`cbe_merkato_consented.csv`, `telebirr_merchant_consented.xlsx`, `dashen_corp_consented.csv`) | **COMPLETED & VERIFIED** |
-| **3. HTTPS & Transport Security Gate** | Production Nginx TLS 1.2/1.3 reverse proxy configuration, HSTS (`max-age=31536000`), secure cookies, and strict CSP with zero external CDNs. | `deploy/nginx.conf`, `tests/security/test_security_audit.py::TestNginxTransportSecurity` | **COMPLETED & VERIFIED** |
-| **4. Sovereign Ethiopian Hosting Gate** | Complete infrastructure topology specification enforcing Rule 7 Sovereign Data Residency: Tier III colocation at Wingu Africa (Addis Ababa), `.et` sovereign ccTLD, domestic peering via EthIX, zero foreign telemetry. | [`docs/sovereign_hosting_ethiopia.md`](file:///C:/Users/Noha/Downloads/daily-close/docs/sovereign_hosting_ethiopia.md) | **COMPLETED & VERIFIED** |
-| **5. Second-Machine Restore Drill Gate** | Bare-metal disaster recovery drill restoring encrypted `age` database backups into clean scratch database, verifying table counts, row counts, and sequence alignment. | [`docs/disaster_recovery_drill.md`](file:///C:/Users/Noha/Downloads/daily-close/docs/disaster_recovery_drill.md), `tests/adversarial/test_backup_restore.py::TestBackupAndDisasterRecovery::test_backup_and_restore_into_scratch_db` | **COMPLETED & VERIFIED** |
-| **6. Regulatory & Licensing Compliance Gate** | Formal legal determinations on Telegram data residency (ephemeral signaling under INSA Proclamation No. 808/2013), accounting licensing (AABE Proclamation No. 847/2014 scope), and Ministry of Revenue Directive 1142 Article 14 append-only audit trail compliance. | [`docs/legal_determinations.md`](file:///C:/Users/Noha/Downloads/daily-close/docs/legal_determinations.md) | **COMPLETED & VERIFIED** |
-| **7. Merchant Consent & Privacy Notice Gate** | Executed bilingual (English & Amharic) Wholesale Merchant Data Processing & Pilot Participation Agreement and Retailer Customer Balance Privacy Notice. | [`docs/merchant_consent_and_privacy_notice.md`](file:///C:/Users/Noha/Downloads/daily-close/docs/merchant_consent_and_privacy_notice.md) | **COMPLETED & VERIFIED** |
+| Pilot Gate Item | Requirement & Description | Current Status |
+| :--- | :--- | :---: |
+| **1. Hold-Out Accuracy Gate** | Blind hold-out dataset test demonstrating exactly zero false confirmations (0.00%) under production matching rules. | **NOT DONE** |
+| **2. Consented Real Statements Gate** | Live ingestion and reconciliation testing of two or three real bank/Telebirr statements from consenting Ethiopian merchants. | **NOT DONE** |
+| **3. HTTPS & Transport Security Gate** | TLS/HTTPS configuration with trusted certificate authority, HSTS headers, and secure cookie domain binding. | **NOT DONE** |
+| **4. Sovereign Ethiopian Hosting Gate** | Physical server provisioning and deployment on domestic infrastructure within Ethiopia (Rule 7 Data Residency). | **NOT DONE** |
+| **5. Second-Machine Restore Drill Gate** | Disaster recovery drill restoring encrypted `age` backups on an independent physical machine from bare metal. | **NOT DONE** |
+| **6. Regulatory & Licensing Compliance Gate** | Formal legal review and signed determinations on Telegram data residency, Accounting and Auditing Board of Ethiopia (AABE) licensing requirements, and Ministry of Revenue Directive 1142 Article 14 accreditation guarantees. | **NOT DONE** |
+| **7. Merchant Consent & Privacy Notice Gate** | Executed bilateral merchant data consent agreements, retailer privacy disclosures, and data subject notification forms. | **NOT DONE** |
 
 ---
 
