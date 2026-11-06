@@ -71,6 +71,8 @@ class TestBackupAndDisasterRecovery:
         import shutil
         age_bin = shutil.which("age")
         if not age_bin:
+            if os.environ.get("REQUIRE_AGE") == "1":
+                pytest.fail("REQUIRE_AGE=1 is set but 'age' executable was not found in PATH.")
             # Verified via static audit and script assertions when binary is missing locally
             return
 
@@ -90,6 +92,13 @@ class TestBackupAndDisasterRecovery:
             # Encrypt with public recipient key
             subprocess.run([age_bin, "-r", pubkey, "-o", str(enc_file), str(test_file)], check=True)
             assert enc_file.exists() and enc_file.stat().st_size > 0
+
+            # Decrypt with private identity key
+            key_file = tmp_path / "key.txt"
+            key_file.write_text(privkey + "\n", encoding="utf-8")
+            dec_file = tmp_path / "decrypted.txt"
+            subprocess.run([age_bin, "-d", "-i", str(key_file), "-o", str(dec_file), str(enc_file)], check=True)
+            assert dec_file.read_bytes() == b"Sovereign Ethiopian AR Backup 2026"
 
     def test_sec_vuln_01_pg_dump_under_app_role_fails_due_to_rls(self, tmp_path):
         """
