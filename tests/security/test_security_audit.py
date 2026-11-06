@@ -20,13 +20,12 @@ import zipfile
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
-from fastapi import Request
 from fastapi.testclient import TestClient
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.channels.web.rate_limit import InMemoryRateLimiter
 from app.channels.web.routes import get_session
+from app.kernel.persistent_rate_limit import RateLimitExceededError, check_persistent_rate_limit
 from app.importers.xlsx_importer import _parse_xlsx_pure_python
 from app.kernel.enums import EvidenceLevel, InvoiceState, MatchState, PaymentState
 from app.kernel.guards import InsufficientEvidenceError, assert_confirmable
@@ -374,26 +373,17 @@ class TestTokenAndRateLimiterSecurity:
         assert resp.status_code == 400
         assert "already completed" in resp.text.lower()
 
-    def test_rate_limiter_blocks_brute_force(self):
-        """Requests exceeding threshold from the same IP are blocked with HTTP 429."""
-        limiter = InMemoryRateLimiter(requests_per_minute=5)
-        from fastapi import HTTPException
-
-        scope = {
-            "type": "http",
-            "headers": [(b"x-forwarded-for", b"192.168.1.100")],
-            "client": ("127.0.0.1", 12345),
-        }
-        req = Request(scope=scope)
-
+    def test_rate_limiter_blocks_brute_force(self, db_session: Session):
+        """Persistent rate limiter raises RateLimitExceededError after max_requests within window."""
+        key = f"test-brute-force-{uuid.uuid4()}"
+        # Allow 5 requests
         for _ in range(5):
-            limiter(req)
+            check_persistent_rate_limit(db_session, key=key, max_requests=5, window_seconds=60)
+        db_session.commit()
 
-        # 6th request must raise HTTP 429
-        with pytest.raises(HTTPException) as exc_info:
-            limiter(req)
-        assert exc_info.value.status_code == 429
-        assert "Too many confirmation requests" in exc_info.value.detail
+        # 6th request must raise RateLimitExceededError
+        with pytest.raises(RateLimitExceededError):
+            check_persistent_rate_limit(db_session, key=key, max_requests=5, window_seconds=60)
 
 
 # ===========================================================================
@@ -578,3 +568,36 @@ class TestEvidenceLadderRule2AbsoluteAudit:
         # Unverified payment must be in the audit queue section, NOT the confirmed payments
         assert "--- SECTION 2: UNMATCHED & PROPOSED ITEMS (AUDIT QUEUE) ---" in accountant_csv
         assert "accepted_unverified" in accountant_csv
+
+
+class TestNginxTransportSecurity:
+    def test_nginx_tls_and_security_headers(self):
+        """Verify Nginx reverse proxy configuration enforces strict TLS and transport security."""
+        from pathlib import Path
+        nginx_path = Path(__file__).parent.parent.parent / "deploy" / "nginx.conf"
+        assert nginx_path.exists(), "deploy/nginx.conf must exist"
+
+        content = nginx_path.read_text(encoding="utf-8")
+
+        # 1. HTTP to HTTPS redirect
+        assert "listen 80;" in content
+        assert "return 301 https://$host$request_uri;" in content
+
+        # 2. TLS protocols & ciphers
+        assert "listen 443 ssl http2;" in content
+        assert "ssl_protocols TLSv1.2 TLSv1.3;" in content
+        assert "ECDHE-ECDSA-AES128-GCM-SHA256" in content
+
+        # 3. HSTS and Transport Security headers
+        assert 'Strict-Transport-Security "max-age=31536000; includeSubDomains"' in content
+        assert 'X-Frame-Options "DENY"' in content
+        assert 'X-Content-Type-Options "nosniff"' in content
+        assert 'Referrer-Policy "strict-origin-when-cross-origin"' in content
+
+        # 4. Strict CSP with zero external CDNs
+        assert "cdn.jsdelivr.net" not in content
+        assert "add_header Content-Security-Policy" in content
+        assert "script-src 'self'" in content
+        assert "object-src 'none'" in content
+        assert "frame-ancestors 'none'" in content
+

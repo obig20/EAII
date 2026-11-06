@@ -12,14 +12,15 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import subprocess
 import uuid
 import pytest
 from sqlalchemy import create_engine, text
 
 POSTGRES_BIN_DIR = r"c:\Users\Noha\Downloads\pgsql\bin"
-PG_DUMP_EXE = os.path.join(POSTGRES_BIN_DIR, "pg_dump.exe")
-PG_RESTORE_EXE = os.path.join(POSTGRES_BIN_DIR, "pg_restore.exe")
+PG_DUMP_EXE = shutil.which("pg_dump") or os.path.join(POSTGRES_BIN_DIR, "pg_dump.exe")
+PG_RESTORE_EXE = shutil.which("pg_restore") or os.path.join(POSTGRES_BIN_DIR, "pg_restore.exe")
 
 
 class TestBackupAndDisasterRecovery:
@@ -78,7 +79,8 @@ class TestBackupAndDisasterRecovery:
         if key_gen:
             res = subprocess.run([key_gen], capture_output=True, text=True, check=True)
             lines = res.stdout.strip().splitlines()
-            pubkey = [l for l in lines if l.startswith("public key: ")][0].split(": ")[1].strip()
+            pubkey_lines = [l for l in lines if l.startswith("public key: ") or l.startswith("# public key: ")]
+            pubkey = pubkey_lines[0].split("public key: ")[1].strip()
             privkey = [l for l in lines if l.startswith("AGE-SECRET-KEY-1")][0].strip()
 
             test_file = tmp_path / "plain.txt"

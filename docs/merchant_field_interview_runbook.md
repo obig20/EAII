@@ -75,7 +75,7 @@ This demonstration covers **only** verified features present on the `master` bra
 
 ### Objection 1: "Does this software report my data to the Ministry of Revenues?"
 - **Response:**  
-  *"No. Daily Close is completely private and runs locally on your own computer or private server. It does not connect to the government, tax authorities, or any third party. It is strictly an internal accounts receivable record to help you track who owes you money."*
+  *"We don't send your data to the Ministry; it is stored on a server we operate in [location to be confirmed]. It is strictly an internal accounts receivable record to help you track who owes you money."*
 
 ### Objection 2: "Is this system tax-compliant or approved by tax authorities?"
 - **Response:**  
@@ -83,7 +83,7 @@ This demonstration covers **only** verified features present on the `master` bra
 
 ### Objection 3: "What if our internet connection drops in the market?"
 - **Response:**  
-  *"Daily Close runs on your local network. You can record credit sales, view aging reports, and review reconciliations without an active internet connection. Active internet is only needed when downloading electronic bank statements or sending Telegram messages."*
+  *"It needs an internet connection; keep paper notes if it drops. For statement imports and Telegram intake, internet is also needed."*
 
 ### Objection 4: "Can staff change past numbers or delete transactions?"
 - **Response:**  
@@ -97,5 +97,5 @@ The following operational, technical, and regulatory items cannot be confirmed f
 1. `[TO VERIFY: Line 25]` Specific wholesale customer payment term distributions (7 days vs 15 days vs 30 days).
 2. `[TO VERIFY: Line 28]` Average daily transaction volumes for FMCG vs building materials wholesalers.
 3. `[TO VERIFY: Line 45]` Legality of customer balance confirmation SMS under Ethiopian telecommunications regulations.
-4. `[TO VERIFY: Line 52]` AABE bookkeeping software certification requirements under Directive 1142.
+4. `[TO VERIFY: Line 52]` Accreditation guarantee requirements under Directive 1142 Article 14 (Directive 1142 Article 14 concerns accreditation guarantees).
 5. `[TO VERIFY: Line 68]` Exact bank statement narrative formats for Awash Bank and Bank of Abyssinia.

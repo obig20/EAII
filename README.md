@@ -50,7 +50,7 @@ daily-close/
 4. **Append-Only Event Log:** Every state change emits an event into `events`. Database permissions enforce `REVOKE UPDATE, DELETE ON events FROM app`. Corrections require new compensating events.
 5. **Invoice-Agnostic:** The system records externally issued invoices (number, retailer, amount, issue date, due date). It never generates invoices, tax documents, or QR codes. Sequence gaps are automatically detected and flagged.
 6. **Zero LLM / AI Decisions:** All payment matching, confirmation, and financial operations use deterministic mathematical rules.
-7. **Sovereign Data Residency:** Runs entirely on a single Ethiopian-hosted server. Zero external analytics SDKs, telemetry, or third-party cloud dependencies.
+7. **Sovereign Data Residency:** The web application and database run entirely on a server operated by Birana Technology. Telegram is used as an optional notification and intake channel and is a third-party service outside our control; all primary financial records are stored only on our server.
 8. **Multi-Tenant Row-Level Security:** Every table has `tenant_id`, strictly isolated via PostgreSQL `FORCE ROW LEVEL SECURITY`. One tenant cannot read or write another tenant's records.
 9. **Log Redaction:** Customer PII and financial figures are never logged above `DEBUG` level. Production runs strictly at `INFO` level.
 10. **Comprehensive Test Suite:** Every feature ships with automated tests. 100% test pass rate required.
@@ -299,7 +299,7 @@ This populates:
 - **Owner Account:** Ato Demo Owner (`demo@dailyclose.et` / `+251911999901`) with password `DemoDailyClose2026!`
 - **Cashier Account:** W/ro Demo Cashier (`demo.cashier@dailyclose.et` / `+251922999902`) with password `DemoCashier123!`
 - **12 Retailers:** Merkato, Piassa, Bole, Mexico, etc.
-- **30 Invoices:** Spread across all 5 AR aging buckets (Current, 1-30, 31-60, 61-90, 90+ days overdue).
+- **30 Invoices:** Spread across all 5 AR aging buckets (Current, 1-30, 31-60, 61-90, 90+ days overdue). 27 open/partial + 3 settled, with ~4,686,000 ETB in total open credit.
 - **9 Bank/Telebirr Lines:** Demonstrating Tier A auto-confirmation, Tier B review queue, Tier C fuzzy match, partial payment with warning, overpayment with unallocated credit, and L4 unverified receipts.
 
 ### Production Safety Guard
@@ -433,11 +433,11 @@ A complete deployment package is included in the `deploy/` directory:
 2. **Systemd Services (`deploy/*.service`):**
    - `dailyclose-web.service` and `dailyclose-bot.service` with process sandboxing (`ProtectSystem=full`, `PrivateTmp=true`).
 3. **Nightly Encrypted Backups (`deploy/backup_nightly.sh`):**
-   - Automatically dumps PostgreSQL data at 02:00 UTC daily.
-   - Encrypts dump using **OpenSSL AES-256-CBC** with PBKDF2 (100,000 iterations).
+   - Automatically dumps PostgreSQL data at 02:00 EAT daily.
+   - Encrypts dump using **`age` asymmetric public-key encryption** (`age1...` recipients). No symmetric passphrase is stored on the server; only the offline private key can decrypt.
    - Generates SHA-256 integrity checksums.
    - Enforces a 30-day retention pruning policy.
-   - Zero external cloud transmission (Rule 7).
+   - Backups are stored locally on the server; no external cloud transmission (Rule 7).
 
 ```bash
 # Setup nightly backup cron on server:
