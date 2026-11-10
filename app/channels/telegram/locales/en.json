@@ -65,5 +65,15 @@
   "evidence_level_l1": "Payment provider",
   "evidence_level_l2": "Bank statement",
   "evidence_level_l3": "Retailer confirmed",
-  "evidence_level_l4": "Photo or note"
+  "evidence_level_l4": "Photo or note",
+  "void_sale_action": "Void Sale",
+  "void_sale_confirm_prompt": "Are you sure you want to void invoice {invoice_number}? This cannot be undone.",
+  "void_reason_wrong_amount": "Wrong amount entered",
+  "void_reason_duplicate_entry": "Duplicate entry",
+  "void_reason_wrong_retailer": "Wrong retailer selected",
+  "void_reason_cancelled_sale": "Cancelled sale / goods returned",
+  "void_reason_other": "Other reason",
+  "void_success_msg": "Invoice {invoice_number} has been voided.",
+  "void_blocked_confirmed_match": "Cannot void invoice with confirmed payments. Please reverse confirmed payments first.",
+  "void_and_reenter_action": "Void and Re-enter"
 }

@@ -103,10 +103,13 @@ def export_sales_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
         .order_by(Invoice.issued_date.desc(), Invoice.invoice_number)
     )
 
+    active_rows = []
+    voided_rows = []
+
     for inv, ret, paid_santim in session.execute(stmt):
         paid_int = int(paid_santim or 0)
         rem_santim = max(0, int(inv.amount_santim) - paid_int)
-        writer.writerow(sanitize_csv_row([
+        row = [
             inv.invoice_number,
             ret.name,
             ret.phone or "",
@@ -119,7 +122,25 @@ def export_sales_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
             rem_santim,
             to_etb(rem_santim),
             inv.state,
+        ]
+        if inv.state == "void":
+            voided_rows.append(row)
+        else:
+            active_rows.append(row)
+
+    for r in active_rows:
+        writer.writerow(sanitize_csv_row(r))
+
+    if voided_rows:
+        writer.writerow([])
+        writer.writerow(sanitize_csv_row(["--- VOIDED SALES (AUDIT TRAIL) ---"]))
+        writer.writerow(sanitize_csv_row([
+            "Invoice Number", "Retailer Name", "Retailer Phone", "Issue Date", "Due Date",
+            "Original Amount (Santim)", "Original Amount (ETB)", "Paid Amount (Santim)",
+            "Paid Amount (ETB)", "Remaining Amount (Santim)", "Remaining Amount (ETB)", "State"
         ]))
+        for r in voided_rows:
+            writer.writerow(sanitize_csv_row(r))
 
     return output.getvalue()
 
@@ -215,7 +236,11 @@ def export_accountant_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
     total_sales_santim = 0
     total_paid_santim = 0
 
+    voided_invoices = []
     for inv, ret, paid_santim in session.execute(sales_stmt):
+        if inv.state == "void":
+            voided_invoices.append((inv, ret))
+            continue
         paid_int = int(paid_santim or 0)
         rem_santim = max(0, int(inv.amount_santim) - paid_int)
         total_sales_santim += int(inv.amount_santim)
@@ -314,6 +339,27 @@ def export_accountant_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
     writer.writerow([])
     writer.writerow(sanitize_csv_row(["TOTAL REVERSED MATCHES", rev_count, "TOTAL REVERSED SANTIM", rev_santim, "TOTAL REVERSED ETB", to_etb(rev_santim)]))
 
+    # SECTION 4: VOIDED SALES (AUDIT TRAIL)
+    writer.writerow([])
+    writer.writerow(["--- SECTION 4: VOIDED SALES (AUDIT TRAIL) ---"])
+    writer.writerow([
+        "Invoice Number", "Retailer", "Issue Date", "Due Date",
+        "Original Santim", "Original ETB", "State",
+    ])
+    total_voided_santim = 0
+    for v_inv, v_ret in voided_invoices:
+        total_voided_santim += int(v_inv.amount_santim)
+        writer.writerow(sanitize_csv_row([
+            v_inv.invoice_number,
+            v_ret.name,
+            v_inv.issued_date.isoformat(),
+            v_inv.due_date.isoformat(),
+            v_inv.amount_santim,
+            to_etb(v_inv.amount_santim),
+            v_inv.state,
+        ]))
+    writer.writerow(sanitize_csv_row(["TOTAL VOIDED SALES (SANTIM)", total_voided_santim, "TOTAL VOIDED SALES (ETB)", to_etb(total_voided_santim)]))
+
     return output.getvalue()
 
 
@@ -379,3 +425,61 @@ def export_reversals_csv(session: Session, tenant_id: uuid.UUID) -> str:
 
     return output.getvalue()
 
+
+
+def export_voided_sales_csv(session: Session, *, tenant_id: uuid.UUID) -> str:
+    """Generate CSV string of all voided sales invoices for this tenant."""
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow(sanitize_csv_row([
+        "Invoice Number",
+        "Retailer Name",
+        "Retailer Phone",
+        "Issue Date",
+        "Due Date",
+        "Original Amount (Santim)",
+        "Original Amount (ETB)",
+        "State",
+        "Reason Code",
+        "Voided At",
+        "Voided By",
+    ]))
+
+    events_stmt = (
+        select(Event)
+        .where(
+            Event.tenant_id == tenant_id,
+            Event.event_type == "invoice.voided",
+            Event.aggregate_type == "invoice",
+        )
+    )
+    void_events = {e.aggregate_id: e for e in session.execute(events_stmt).scalars().all()}
+
+    stmt = (
+        select(Invoice, Retailer)
+        .join(Retailer, Invoice.retailer_id == Retailer.id)
+        .where(Invoice.tenant_id == tenant_id, Invoice.state == "void")
+        .order_by(Invoice.issued_date.desc(), Invoice.invoice_number)
+    )
+
+    for inv, ret in session.execute(stmt):
+        ev = void_events.get(inv.id)
+        reason_code = ev.payload.get("reason_code", "") if ev and ev.payload else ""
+        voided_at = ev.created_at.isoformat() if ev and ev.created_at else (inv.created_at.isoformat() if inv.created_at else "")
+        voided_by = str(ev.actor_id) if ev and ev.actor_id else ""
+        writer.writerow(sanitize_csv_row([
+            inv.invoice_number,
+            ret.name,
+            ret.phone or "",
+            inv.issued_date.isoformat(),
+            inv.due_date.isoformat(),
+            inv.amount_santim,
+            to_etb(inv.amount_santim),
+            inv.state,
+            reason_code,
+            voided_at,
+            voided_by,
+        ]))
+
+    return output.getvalue()

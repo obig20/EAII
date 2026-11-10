@@ -72,6 +72,18 @@ class ReversalReasonCode(str, Enum):
     OTHER = "other"
 
 
+class VoidReasonCode(str, Enum):
+    """
+    Structured reason code for voiding a credit sale.
+    Stored in append-only event payloads without personal data.
+    """
+    WRONG_AMOUNT = "wrong_amount"
+    DUPLICATE_ENTRY = "duplicate_entry"
+    WRONG_RETAILER = "wrong_retailer"
+    CANCELLED_SALE = "cancelled_sale"
+    OTHER = "other"
+
+
 class MatchTier(str, Enum):
     """
     Matching tier that produced a payment_match row.

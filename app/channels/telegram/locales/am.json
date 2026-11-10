@@ -65,5 +65,15 @@
   "evidence_level_l1": "የክፍያ አቅራቢ (needs native review)",
   "evidence_level_l2": "የባንክ መግለጫ (needs native review)",
   "evidence_level_l3": "በነጋዴው የተረጋገጠ (needs native review)",
-  "evidence_level_l4": "ፎቶ ወይም ማስታወሻ (needs native review)"
+  "evidence_level_l4": "ፎቶ ወይም ማስታወሻ (needs native review)",
+  "void_sale_action": "ሽያጩን ውድቅ አድርግ <!-- needs native review -->",
+  "void_sale_confirm_prompt": "ደረሰኝ {invoice_number} ውድቅ ማድረግ ይፈልጋሉ? ይህ እርምጃ ሊቀለበስ አይችልም። <!-- needs native review -->",
+  "void_reason_wrong_amount": "የተሳሳተ የገንዘብ መጠን ተመዝግቧል <!-- needs native review -->",
+  "void_reason_duplicate_entry": "የተደገመ ምዝገባ <!-- needs native review -->",
+  "void_reason_wrong_retailer": "የተሳሳተ ቸርቻሪ ተመርጧል <!-- needs native review -->",
+  "void_reason_cancelled_sale": "የተሰረዘ ሽያጭ / እቃ የተመለሰ <!-- needs native review -->",
+  "void_reason_other": "ሌላ ምክንያት <!-- needs native review -->",
+  "void_success_msg": "ደረሰኝ {invoice_number} ውድቅ ተደርጓል። <!-- needs native review -->",
+  "void_blocked_confirmed_match": "የተረጋገጠ ክፍያ ያለውን ደረሰኝ ውድቅ ማድረግ አይቻልም። እባክዎ መጀመሪያ የተረጋገጠውን ክፍያ ይመልሱ። <!-- needs native review -->",
+  "void_and_reenter_action": "ውድቅ አድርገህ እንደገና አስገባ <!-- needs native review -->"
 }

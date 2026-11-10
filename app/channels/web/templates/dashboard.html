@@ -129,28 +129,45 @@
       </div>
 
       <!-- Collapsible Drawer for Sales Entry -->
-      <div id="drawer-sales" style="display: none; background: #f8fafc; border: 1.5px solid var(--color-input-border); border-radius: var(--radius-md); padding: 1.25rem; margin-bottom: 1rem;">
+      <div id="drawer-sales" style="display: {% if prefill_sale %}block{% else %}none{% endif %}; background: #f8fafc; border: 1.5px solid var(--color-input-border); border-radius: var(--radius-md); padding: 1.25rem; margin-bottom: 1rem;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
           <h3 style="font-size: 0.9375rem; font-weight: 800;">
-            {% if lang == 'am' %}አዲስ የብድር ሽያጭ መመዝገቢያ{% else %}Record Single Credit Sale{% endif %}
+            {% if prefill_sale %}
+              {% if lang == 'am' %}የተሰረዘ ሽያጭ እንደገና መመዝገቢያ <!-- needs native review -->{% else %}Re-Enter Voided Sale{% endif %}
+            {% else %}
+              {% if lang == 'am' %}አዲስ የብድር ሽያጭ መመዝገቢያ{% else %}Record Single Credit Sale{% endif %}
+            {% endif %}
           </h3>
           <button type="button" data-action="close-drawer" data-target="drawer-sales" style="background: transparent; border: none; font-size: 1.25rem; cursor: pointer; color: var(--color-text-muted);">&times;</button>
         </div>
 
+        {% if prefill_sale %}
+        <div style="background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 0.75rem; border-radius: var(--radius-sm); font-size: 0.8125rem; margin-bottom: 1rem;">
+          {% if lang == 'am' %}
+          ውድቅ የተደረገውን ደረሰኝ {{ prefill_sale.invoice_number }} እንደገና በማስገባት ላይ። ይህንኑ የደረሰኝ ቁጥር እንደገና መጠቀም ወይም ማስተካከል ይችላሉ። <!-- needs native review -->
+          {% else %}
+          Re-entering voided sale <strong>{{ prefill_sale.invoice_number }}</strong>. You may reuse this invoice number or update details.
+          {% endif %}
+        </div>
+        {% endif %}
+
         <form action="/sales" method="POST" id="sales-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          {% if prefill_sale %}
+          <input type="hidden" name="replaces_invoice_id" value="{{ prefill_sale.replaces_invoice_id }}">
+          {% endif %}
           
           <div style="display: grid; grid-template-columns: 1fr; gap: 0.75rem;">
             <div class="form-group" style="margin-bottom: 0;">
               <label class="form-label">{% if lang == 'am' %}የደረሰኝ ቁጥር *{% else %}Invoice Number *{% endif %}</label>
-              <input type="text" name="invoice_number" required placeholder="e.g. INV-381" class="form-input">
+              <input type="text" name="invoice_number" required placeholder="e.g. INV-381" class="form-input" value="{% if prefill_sale %}{{ prefill_sale.invoice_number }}{% endif %}">
             </div>
 
             <div class="form-group" style="margin-bottom: 0;">
               <label class="form-label">{% if lang == 'am' %}ደንበኛ *{% else %}Retailer *{% endif %}</label>
               <select name="retailer_id" required class="form-select">
                 {% for r in retailers %}
-                <option value="{{ r.id }}">{{ r.name }} ({{ r.phone or 'No phone' }})</option>
+                <option value="{{ r.id }}" {% if prefill_sale and prefill_sale.retailer_id == (r.id|string) %}selected{% endif %}>{{ r.name }} ({{ r.phone or 'No phone' }})</option>
                 {% endfor %}
               </select>
             </div>
@@ -158,11 +175,11 @@
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
               <div class="form-group" style="margin-bottom: 0;">
                 <label class="form-label">{% if lang == 'am' %}መጠን (ብር) *{% else %}Amount (ETB) *{% endif %}</label>
-                <input type="text" name="amount_etb" required placeholder="1250.00" class="form-input">
+                <input type="text" name="amount_etb" required placeholder="1250.00" class="form-input" value="{% if prefill_sale %}{{ prefill_sale.amount_etb }}{% endif %}">
               </div>
               <div class="form-group" style="margin-bottom: 0;">
                 <label class="form-label">{% if lang == 'am' %}የመክፈያ ቀን *{% else %}Due Date *{% endif %}</label>
-                <input type="date" name="due_date" required value="{{ default_due_date.isoformat() }}" class="form-input">
+                <input type="date" name="due_date" required value="{% if prefill_sale %}{{ prefill_sale.due_date }}{% else %}{{ default_due_date.isoformat() }}{% endif %}" class="form-input">
               </div>
             </div>
 
@@ -413,6 +430,111 @@
             {% endif %}
           </div>
         {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <!-- SALES INVOICES & VOID MANAGEMENT SECTION -->
+  <section id="invoices-section" style="margin-bottom: 2rem;">
+    <div class="card">
+      <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+        <div>
+          <h3 class="card-title" style="display: flex; align-items: center; gap: 0.5rem;">
+            <svg class="icon" viewBox="0 0 24 24" style="color: var(--color-primary);"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+            {% if lang == 'am' %}የሽያጭ ደረሰኞች አስተዳደር <!-- needs native review -->{% else %}Sales Invoices & Void Audit{% endif %}
+          </h3>
+          <p style="font-size: 0.75rem; color: var(--color-text-muted);">
+            {% if lang == 'am' %}የተመዘገቡ ደረሰኞችን ይከታተሉ ወይም ስህተት ሲኖር ውድቅ ያድርጉ <!-- needs native review -->{% else %}Audit credit sales, void errors with reason codes, or re-enter corrected invoices{% endif %}
+          </p>
+        </div>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <a href="/exports/sales.csv" class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.35rem 0.65rem;">
+            Export Sales CSV
+          </a>
+          <a href="/exports/voided-sales.csv" class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.35rem 0.65rem;">
+            Export Voided CSV
+          </a>
+        </div>
+      </div>
+
+      <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.8125rem;">
+          <thead style="background: #f8fafc; color: var(--color-text-muted); font-size: 0.75rem; text-transform: uppercase;">
+            <tr>
+              <th style="padding: 0.6rem 1rem; text-align: left;">Invoice Number</th>
+              <th style="padding: 0.6rem 0.75rem; text-align: left;">Retailer</th>
+              <th style="padding: 0.6rem 0.75rem; text-align: right;">Amount</th>
+              <th style="padding: 0.6rem 0.75rem; text-align: center;">Due Date</th>
+              <th style="padding: 0.6rem 0.75rem; text-align: center;">State</th>
+              <th style="padding: 0.6rem 1rem; text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for inv in recent_invoices %}
+            <tr style="border-bottom: 1px solid var(--color-border-subtle); background: {% if inv.is_void %}#fdf2f2{% else %}transparent{% endif %};">
+              <td style="padding: 0.6rem 1rem; font-weight: 700;">
+                {{ inv.invoice_number }}
+              </td>
+              <td style="padding: 0.6rem 0.75rem;">
+                {{ inv.retailer_name }}
+              </td>
+              <td style="padding: 0.6rem 0.75rem; text-align: right; font-weight: 700;">
+                {{ inv.amount_etb }}
+              </td>
+              <td style="padding: 0.6rem 0.75rem; text-align: center; color: var(--color-text-muted);">
+                {{ inv.due_date }}
+              </td>
+              <td style="padding: 0.6rem 0.75rem; text-align: center;">
+                {% if inv.is_void %}
+                  <span class="badge" style="background: #fee2e2; color: #991b1b; font-weight: 700;">VOID</span>
+                {% elif inv.state == 'settled' %}
+                  <span class="badge" style="background: #e0f2fe; color: #075985; font-weight: 700;">SETTLED</span>
+                {% elif inv.state == 'partially_paid' %}
+                  <span class="badge" style="background: #fef3c7; color: #92400e; font-weight: 700;">PARTIAL</span>
+                {% else %}
+                  <span class="badge" style="background: #dcfce7; color: #166534; font-weight: 700;">OPEN</span>
+                {% endif %}
+              </td>
+              <td style="padding: 0.6rem 1rem; text-align: right;">
+                {% if user_role == 'owner' %}
+                  {% if inv.is_void %}
+                    <a href="/invoices/{{ inv.id }}/void-and-reenter" class="btn btn-secondary" style="font-size: 0.7rem; padding: 0.2rem 0.5rem; text-decoration: none;">
+                      {% if lang == 'am' %}እንደገና አስገባ <!-- needs native review -->{% else %}Re-Enter{% endif %}
+                    </a>
+                  {% else %}
+                    <div style="display: inline-flex; gap: 0.35rem; align-items: center;">
+                      <form action="/invoices/{{ inv.id }}/void" method="POST" style="display: inline-flex; gap: 0.25rem; align-items: center;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <select name="reason_code" required style="font-size: 0.7rem; padding: 0.15rem; border-radius: var(--radius-sm); border: 1px solid var(--color-input-border);">
+                          <option value="wrong_amount">Wrong amount</option>
+                          <option value="duplicate_entry">Duplicate entry</option>
+                          <option value="wrong_retailer">Wrong retailer</option>
+                          <option value="cancelled_sale">Cancelled sale</option>
+                          <option value="other">Other</option>
+                        </select>
+                        <button type="submit" class="btn btn-danger-outline" style="font-size: 0.7rem; padding: 0.2rem 0.5rem;"
+                                hx-confirm="Are you sure you want to void invoice {{ inv.invoice_number }}? This cannot be undone.">
+                          {% if lang == 'am' %}ውድቅ አድርግ <!-- needs native review -->{% else %}Void{% endif %}
+                        </button>
+                      </form>
+                      <a href="/invoices/{{ inv.id }}/void-and-reenter" class="btn btn-secondary" style="font-size: 0.7rem; padding: 0.2rem 0.5rem; text-decoration: none;"
+                         hx-confirm="Void invoice {{ inv.invoice_number }} and prefill corrected sales form?">
+                        {% if lang == 'am' %}ውድቅ አድርግና እንደገና አስገባ <!-- needs native review -->{% else %}Void & Re-enter{% endif %}
+                      </a>
+                    </div>
+                  {% endif %}
+                {% else %}
+                  <span style="font-size: 0.7rem; color: var(--color-text-muted);">Owner only</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="6" style="padding: 1.5rem; text-align: center; color: var(--color-text-muted);">No sales invoices recorded yet.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
     </div>
   </section>

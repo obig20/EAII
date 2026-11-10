@@ -51,7 +51,7 @@ from app.kernel.auth import (
     verify_password,
 )
 from app.kernel.db import get_session
-from app.kernel.enums import EvidenceLevel, InvoiceState, MatchState, PaymentState, ReversalReasonCode, UserRole
+from app.kernel.enums import EvidenceLevel, InvoiceState, MatchState, PaymentState, ReversalReasonCode, UserRole, VoidReasonCode
 from app.kernel.events import append_event
 from app.kernel.guards import InsufficientEvidenceError, assert_confirmable
 from app.kernel.models import Event, ImportBatch, Invoice, PaymentLine, PaymentMatch, ProcessedApprovalToken, RateLimitBucket, Retailer, ReversalNote, Session as SessionModel, Tenant, User
@@ -82,7 +82,7 @@ from app.kernel.retailer_confirmation import (
     dispute_retailer_balance,
     validate_confirmation_token,
 )
-from app.kernel.sales import DuplicateInvoiceError, InvalidSaleError, parse_and_record_sales_csv, record_credit_sale
+from app.kernel.sales import (AlreadyVoidedError, DuplicateInvoiceError, InvalidSaleError, InvoiceHasConfirmedMatchesError, InvoiceNotFoundError, parse_and_record_sales_csv, record_credit_sale, void_credit_sale)
 from app.kernel.tenant import set_tenant
 from app.matching.matcher import PaymentMatcher
 from app.matching.normalization import (
@@ -92,7 +92,7 @@ from app.matching.normalization import (
     string_similarity,
 )
 from app.reports.aging import generate_aging_report
-from app.reports.exports import export_accountant_csv, export_payments_csv, export_reversals_csv, export_sales_csv
+from app.reports.exports import export_accountant_csv, export_payments_csv, export_reversals_csv, export_sales_csv, export_voided_sales_csv
 from app.reports.morning_brief import generate_morning_brief_text
 from app.settings import settings
 
@@ -1128,6 +1128,48 @@ def dashboard(
         "previously_reversed": cnt_reversed,
     }
 
+    # Query recent sales invoices for management and voiding
+    recent_invoices_stmt = (
+        select(Invoice, Retailer)
+        .join(Retailer, Invoice.retailer_id == Retailer.id)
+        .where(Invoice.tenant_id == tenant.id)
+        .order_by(Invoice.created_at.desc())
+        .limit(30)
+    )
+    recent_invoices = []
+    for inv, ret in session.execute(recent_invoices_stmt):
+        recent_invoices.append({
+            "id": str(inv.id),
+            "invoice_number": inv.invoice_number,
+            "retailer_name": ret.name,
+            "amount_etb": format_money(inv.amount_santim, include_currency=True),
+            "amount_santim": inv.amount_santim,
+            "issued_date": inv.issued_date.strftime("%d/%m/%Y"),
+            "due_date": inv.due_date.strftime("%d/%m/%Y"),
+            "state": inv.state,
+            "is_void": (inv.state == InvoiceState.VOID.value),
+        })
+
+    # Check for reenter_invoice_id query parameter
+    reenter_id = request.query_params.get("reenter_invoice_id")
+    prefill_sale = None
+    if reenter_id:
+        try:
+            r_uuid = uuid.UUID(reenter_id)
+            r_inv = session.execute(
+                select(Invoice).where(Invoice.id == r_uuid, Invoice.tenant_id == tenant.id)
+            ).scalar_one_or_none()
+            if r_inv:
+                prefill_sale = {
+                    "replaces_invoice_id": str(r_inv.id),
+                    "invoice_number": r_inv.invoice_number,
+                    "retailer_id": str(r_inv.retailer_id),
+                    "amount_etb": f"{r_inv.amount_santim / 100:.2f}",
+                    "due_date": r_inv.due_date.isoformat(),
+                }
+        except ValueError:
+            pass
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -1148,6 +1190,8 @@ def dashboard(
             "today_batches_count": today_batches_count,
             "all_tasks_complete": all_tasks_complete,
             "recently_confirmed": recently_confirmed,
+            "recent_invoices": recent_invoices,
+            "prefill_sale": prefill_sale,
             "needs_attention_items": needs_attention_items,
             "needs_attention_counts": needs_attention_counts,
         },
@@ -1183,6 +1227,7 @@ def create_sale(
     retailer_id: str = Form(...),
     amount_etb: str = Form(...),
     due_date: str = Form(...),
+    replaces_invoice_id: str | None = Form(None),
     session: Session = Depends(get_session),
     session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
     _csrf: None = Depends(verify_csrf),
@@ -1196,6 +1241,10 @@ def create_sale(
         santim = parse_amount_santim(amount_etb)
         today = datetime.now(timezone.utc).date()
 
+        replaces_uuid = None
+        if replaces_invoice_id and replaces_invoice_id.strip():
+            replaces_uuid = uuid.UUID(replaces_invoice_id.strip())
+
         inv, gaps = record_credit_sale(
             session,
             tenant_id=tenant.id,
@@ -1205,6 +1254,7 @@ def create_sale(
             amount_santim=santim,
             issued_date=today,
             due_date=due_d,
+            replaces_invoice_id=replaces_uuid,
         )
         session.commit()
 
@@ -2197,4 +2247,115 @@ def submit_balance_dispute(
             "reason_code": reason_code,
             "explanation": explanation,
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Void Credit Sale Routes (Owner Only)
+# ---------------------------------------------------------------------------
+@router.post("/invoices/{invoice_id}/void")
+def void_invoice_endpoint(
+    invoice_id: str,
+    reason_code: str = Form(...),
+    notes: str | None = Form(None),
+    session: Session = Depends(get_session),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+    _csrf: None = Depends(verify_csrf),
+):
+    """
+    Owner-only voiding of an invoice. Emits compensating event, unlinks proposed matches,
+    records optional note, and prevents double-void or void with confirmed matches.
+    """
+    tenant, user = owner_context
+    set_tenant(session, tenant.id)
+
+    try:
+        inv_uuid = uuid.UUID(invoice_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid invoice ID")
+
+    try:
+        inv = void_credit_sale(
+            session,
+            tenant_id=tenant.id,
+            user_id=user.id,
+            invoice_id=inv_uuid,
+            reason_code=reason_code,
+            notes=notes,
+        )
+        session.commit()
+    except InvoiceNotFoundError:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    except AlreadyVoidedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    except InvoiceHasConfirmedMatchesError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    except InvalidSaleError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return RedirectResponse(f"/?msg=Invoice+{inv.invoice_number}+voided+successfully", status_code=303)
+
+
+@router.get("/invoices/{invoice_id}/void-and-reenter")
+def void_and_reenter_endpoint(
+    invoice_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+):
+    """
+    Owner-only Void and Re-enter flow. Voids the target invoice if not already voided,
+    and redirects to the dashboard with the sales form prefilled with the original
+    invoice details and replaces_invoice_id to permit number reuse.
+    """
+    tenant, user = owner_context
+    set_tenant(session, tenant.id)
+
+    try:
+        inv_uuid = uuid.UUID(invoice_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid invoice ID")
+
+    invoice = session.execute(
+        select(Invoice).where(Invoice.id == inv_uuid, Invoice.tenant_id == tenant.id)
+    ).scalar_one_or_none()
+
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    if invoice.state != InvoiceState.VOID.value:
+        try:
+            void_credit_sale(
+                session,
+                tenant_id=tenant.id,
+                user_id=user.id,
+                invoice_id=inv_uuid,
+                reason_code=VoidReasonCode.WRONG_AMOUNT.value,
+                notes="Voided via Void and Re-enter flow",
+            )
+            session.commit()
+        except InvoiceHasConfirmedMatchesError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+        except AlreadyVoidedError:
+            pass
+
+    return RedirectResponse(
+        f"/?reenter_invoice_id={invoice.id}&msg=Invoice+{invoice.invoice_number}+voided.+Please+review+and+re-enter.",
+        status_code=303
+    )
+
+
+@router.get("/exports/voided-sales.csv")
+def export_voided_sales_endpoint(
+    session: Session = Depends(get_session),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+):
+    tenant, _ = owner_context
+    set_tenant(session, tenant.id)
+    csv_content = export_voided_sales_csv(session, tenant_id=tenant.id)
+    filename = f"voided_sales_{tenant.id}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

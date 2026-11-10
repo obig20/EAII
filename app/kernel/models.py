@@ -25,6 +25,7 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -267,8 +268,13 @@ class ImportBatch(Base):
 class Invoice(Base):
     __tablename__ = "invoices"
     __table_args__ = (
-        # Rule: UNIQUE invoice_number per tenant
-        UniqueConstraint("tenant_id", "invoice_number", name="uq_invoice_number_per_tenant"),
+        Index(
+            "uq_active_invoice_number_per_tenant",
+            "tenant_id",
+            "invoice_number",
+            unique=True,
+            postgresql_where=text("state != 'void'"),
+        ),
         # Rule: amount must be positive integer santim
         CheckConstraint("amount_santim > 0", name="ck_invoice_amount_positive"),
     )
@@ -289,6 +295,9 @@ class Invoice(Base):
     due_date: Mapped[date] = mapped_column(Date, nullable=False)
     state: Mapped[str] = mapped_column(
         String(20), nullable=False, default="open"
+    )
+    replaces_invoice_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False
@@ -496,3 +505,28 @@ class ProcessedApprovalToken(Base):
         TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
+
+
+# ---------------------------------------------------------------------------
+# invoice_void_notes (deletable notes table for voided sales)
+# ---------------------------------------------------------------------------
+class InvoiceVoidNote(Base):
+    __tablename__ = "invoice_void_notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    invoice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=False, index=True
+    )
+    reason_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )

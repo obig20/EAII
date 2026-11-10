@@ -38,8 +38,18 @@ import uuid
 # Set test defaults for test execution:
 # DATABASE_URL connects as the unprivileged 'app' role (NOBYPASSRLS) by default.
 # DATABASE_MIGRATION_URL connects as the superuser for migrations only.
-os.environ.setdefault("DATABASE_MIGRATION_URL", "postgresql+psycopg://postgres@localhost:5432/dailyclose_test")
-os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://app@localhost:5432/dailyclose_test")
+if "DATABASE_URL" not in os.environ or "DATABASE_MIGRATION_URL" not in os.environ:
+    try:
+        from app.settings import settings
+        test_db_url = settings.database_url.replace("/dailyclose_demo", "/dailyclose_test")
+        test_mig_url = settings.database_migration_url.replace("/dailyclose_demo", "/dailyclose_test")
+        os.environ["DATABASE_URL"] = test_db_url
+        os.environ["DATABASE_MIGRATION_URL"] = test_mig_url
+        settings.database_url = test_db_url
+        settings.database_migration_url = test_mig_url
+    except Exception:
+        os.environ.setdefault("DATABASE_MIGRATION_URL", "postgresql+psycopg://postgres@localhost:5432/dailyclose_test")
+        os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://app@localhost:5432/dailyclose_test")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-32-chars-long-minimum!")
 os.environ.setdefault("APP_ENV", "test")
 from datetime import datetime, timezone
@@ -96,6 +106,10 @@ def engine():
             "Run tests via docker-compose.test.yml or set DATABASE_URL."
         )
     eng = create_engine(url, pool_pre_ping=True, echo=False)
+    from app.kernel import db
+    db._engine = eng
+    db.engine = eng
+    db._SessionLocal.configure(bind=eng)
     yield eng
     eng.dispose()
 
@@ -105,6 +119,10 @@ def admin_engine():
     """Admin superuser engine strictly for Alembic migrations and DDL setup."""
     url = os.environ.get("DATABASE_MIGRATION_URL", "postgresql+psycopg://postgres@localhost:5432/dailyclose_test")
     eng = create_engine(url, pool_pre_ping=True, echo=False)
+    from app.kernel import db
+    db._engine = eng
+    db.engine = eng
+    db._SessionLocal.configure(bind=eng)
     yield eng
     eng.dispose()
 

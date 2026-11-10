@@ -17,10 +17,24 @@ import subprocess
 import uuid
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine.url import make_url
 
 POSTGRES_BIN_DIR = r"c:\Users\Noha\Downloads\pgsql\bin"
 PG_DUMP_EXE = shutil.which("pg_dump") or os.path.join(POSTGRES_BIN_DIR, "pg_dump.exe")
 PG_RESTORE_EXE = shutil.which("pg_restore") or os.path.join(POSTGRES_BIN_DIR, "pg_restore.exe")
+
+_db_url_str = os.environ.get("DATABASE_MIGRATION_URL") or os.environ.get("DATABASE_URL")
+if not _db_url_str:
+    try:
+        from app.settings import settings
+        _db_url_str = settings.database_migration_url
+    except Exception:
+        _db_url_str = "postgresql+psycopg://postgres:db8db0569000a83c807942ca9a8bc2aa@localhost:5433/dailyclose_test"
+
+_parsed = make_url(_db_url_str)
+PG_HOST = _parsed.host or "localhost"
+PG_PORT = str(_parsed.port or 5433)
+PG_PASSWORD = _parsed.password or "db8db0569000a83c807942ca9a8bc2aa"
 
 
 class TestBackupAndDisasterRecovery:
@@ -113,12 +127,13 @@ class TestBackupAndDisasterRecovery:
         proc_app = subprocess.run(
             [
                 PG_DUMP_EXE,
-                "-h", "localhost",
-                "-p", "5432",
+                "-h", PG_HOST,
+                "-p", PG_PORT,
                 "-U", "app",
                 "-d", "dailyclose_scratch",
                 "-F", "c",
             ],
+            env={**os.environ, "PGPASSWORD": PG_PASSWORD},
             capture_output=True,
             encoding="utf-8",
             errors="replace",
@@ -134,13 +149,14 @@ class TestBackupAndDisasterRecovery:
         proc_backup = subprocess.run(
             [
                 PG_DUMP_EXE,
-                "-h", "localhost",
-                "-p", "5432",
+                "-h", PG_HOST,
+                "-p", PG_PORT,
                 "-U", "backup_role",
                 "-d", "dailyclose_test",
                 "-F", "c",
                 "-f", str(backup_tmp),
             ],
+            env={**os.environ, "PGPASSWORD": PG_PASSWORD},
             capture_output=True,
             encoding="utf-8",
             errors="replace",
@@ -162,13 +178,14 @@ class TestBackupAndDisasterRecovery:
         dump_proc = subprocess.run(
             [
                 PG_DUMP_EXE,
-                "-h", "localhost",
-                "-p", "5432",
+                "-h", PG_HOST,
+                "-p", PG_PORT,
                 "-U", "postgres",
                 "-d", "dailyclose_test",
                 "-F", "c",
                 "-f", str(dump_file),
             ],
+            env={**os.environ, "PGPASSWORD": PG_PASSWORD},
             capture_output=True,
             encoding="utf-8",
             errors="replace",
@@ -180,14 +197,15 @@ class TestBackupAndDisasterRecovery:
         restore_proc = subprocess.run(
             [
                 PG_RESTORE_EXE,
-                "-h", "localhost",
-                "-p", "5432",
+                "-h", PG_HOST,
+                "-p", PG_PORT,
                 "-U", "postgres",
                 "-d", "dailyclose_scratch",
                 "--clean",
                 "--if-exists",
                 str(dump_file),
             ],
+            env={**os.environ, "PGPASSWORD": PG_PASSWORD},
             capture_output=True,
             encoding="utf-8",
             errors="replace",
@@ -196,7 +214,7 @@ class TestBackupAndDisasterRecovery:
         assert restore_proc.returncode in (0, 1), f"pg_restore failed: {restore_proc.stderr}"
 
         # 3. Connect to scratch DB and verify table count
-        scratch_engine = create_engine("postgresql+psycopg://postgres@localhost:5432/dailyclose_scratch")
+        scratch_engine = create_engine(f"postgresql+psycopg://postgres:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/dailyclose_scratch")
         with scratch_engine.connect() as conn:
             tables = conn.execute(
                 text("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'")
