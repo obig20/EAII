@@ -95,5 +95,18 @@
   "wizard_update_preview": "ቅድመ-ዕይታውን አድስ <!-- needs native review -->",
   "wizard_save_mapping": "ይህንን ማዛመጃ ለወደፊት ማስገቢያዎች አስቀምጥ <!-- needs native review -->",
   "wizard_error_report": "የስህተት ሪፖርት አውርድ (CSV) <!-- needs native review -->",
-  "wizard_row_count": "{valid} ትክክለኛ ገቢ ክፍያዎች ተዘጋጅተዋል፣ {errors} ስህተቶች ተገኝተዋል <!-- needs native review -->"
+  "wizard_row_count": "{valid} ትክክለኛ ገቢ ክፍያዎች ተዘጋጅተዋል፣ {errors} ስህተቶች ተገኝተዋል <!-- needs native review -->",
+  "reminders_title": "የክፍያ ማስታወሻዎች <!-- needs native review -->",
+  "reminders_subtitle": "ጊዜያቸው ያለፈባቸውን የዱቤ ሂሳቦች ይከታተሉ እና የክፍያ ቃሎችን ይመዝግቡ <!-- needs native review -->",
+  "reminders_overdue_retailers": "ጊዜያቸው ያለፈባቸው ባለዕዳዎች <!-- needs native review -->",
+  "reminders_compose_title": "ማስታወሻ ያዘጋጁ <!-- needs native review -->",
+  "reminders_log_sent": "ማስታወሻ መላኩን መዝግብ <!-- needs native review -->",
+  "reminders_promise_to_pay": "የክፍያ ቃል <!-- needs native review -->",
+  "reminders_record_promise": "የክፍያ ቃል መዝግብ <!-- needs native review -->",
+  "reminders_promise_expected": "ይከፈላል ተብሎ የሚጠበቀው <!-- needs native review -->",
+  "reminders_promise_missed": "ያልተፈጸመ ቃል <!-- needs native review -->",
+  "reminders_cancel_promise": "የክፍያ ቃል ሰርዝ <!-- needs native review -->",
+  "reminders_copy_message": "መልዕክቱን ገልብጥ <!-- needs native review -->",
+  "reminders_open_sms": "በኤስኤምኤስ ላክ <!-- needs native review -->",
+  "reminders_call_phone": "ደውል <!-- needs native review -->"
 }

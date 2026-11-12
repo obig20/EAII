@@ -62,7 +62,7 @@ from app.kernel.db import get_session
 from app.kernel.enums import EvidenceLevel, InvoiceState, MatchState, PaymentState, ReversalReasonCode, UserRole, VoidReasonCode
 from app.kernel.events import append_event
 from app.kernel.guards import InsufficientEvidenceError, assert_confirmable
-from app.kernel.models import Event, ImportBatch, ImportBatchError, Invoice, PaymentLine, PaymentMatch, ProcessedApprovalToken, RateLimitBucket, Retailer, ReversalNote, Session as SessionModel, Tenant, TenantImportMapping, User
+from app.kernel.models import Event, ImportBatch, ImportBatchError, Invoice, PaymentLine, PaymentMatch, ProcessedApprovalToken, PromiseToPay, RateLimitBucket, Retailer, ReversalNote, Session as SessionModel, Tenant, TenantImportMapping, User
 from app.channels.telegram.i18n import t
 from app.kernel.money import format_money, to_etb
 from app.matching.context import compute_match_reconciliation_context
@@ -102,6 +102,13 @@ from app.matching.normalization import (
 from app.reports.aging import generate_aging_report
 from app.reports.exports import export_accountant_csv, export_payments_csv, export_reversals_csv, export_sales_csv, export_voided_sales_csv
 from app.reports.morning_brief import generate_morning_brief_text
+from app.reports.reminders import (
+    cancel_promise_to_pay,
+    create_promise_to_pay,
+    generate_reminder_text,
+    get_overdue_retailers,
+    log_reminder_sent,
+)
 from app.settings import settings
 
 
@@ -2800,6 +2807,244 @@ def morning_brief(
 
 
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Stage 4: Payment Reminders and Promise-to-Pay Routes (Owner Only)
+# ---------------------------------------------------------------------------
+
+@router.get("/reminders", response_class=HTMLResponse)
+def get_reminders_dashboard(
+    request: Request,
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+):
+    tenant, user, session_rec = session_info
+    if user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+    set_tenant(session, tenant.id)
+
+    overdue_list = get_overdue_retailers(session, tenant_id=tenant.id)
+    lang = request.cookies.get("lang", "en")
+    msg = request.query_params.get("msg")
+
+    return templates.TemplateResponse(
+        request=request,
+        name="reminders.html",
+        context={
+            "tenant": tenant,
+            "user": user,
+            "lang": lang,
+            "overdue_list": overdue_list,
+            "msg": msg,
+        },
+    )
+
+
+@router.get("/reminders/{retailer_id}/compose", response_class=HTMLResponse)
+def get_reminder_compose(
+    retailer_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+):
+    tenant, user, session_rec = session_info
+    if user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+    set_tenant(session, tenant.id)
+
+    try:
+        ret_uuid = uuid.UUID(retailer_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid retailer ID")
+
+    retailer = session.execute(
+        select(Retailer).where(Retailer.tenant_id == tenant.id, Retailer.id == ret_uuid)
+    ).scalar_one_or_none()
+    if not retailer:
+        raise HTTPException(status_code=404, detail="Retailer not found")
+
+    overdue_list = get_overdue_retailers(session, tenant_id=tenant.id)
+    ret_data = next((r for r in overdue_list if r["retailer_id"] == ret_uuid), None)
+
+    if not ret_data:
+        count = 0
+        total_santim = 0
+        earliest_due = datetime.now(timezone.utc).date()
+    else:
+        count = ret_data["overdue_count"]
+        total_santim = ret_data["total_overdue_santim"]
+        earliest_due = ret_data["earliest_due_date"]
+
+    lang = request.cookies.get("lang", "en")
+    reminder_text = generate_reminder_text(
+        tenant_name=tenant.name,
+        retailer_name=retailer.name,
+        count=count,
+        amount_santim=total_santim,
+        earliest_due=earliest_due,
+        lang=lang,
+    )
+
+    phone_clean = (retailer.phone or "").strip()
+    sms_url = f"sms:{quote(phone_clean)}?body={quote(reminder_text)}" if phone_clean else "#"
+    tel_url = f"tel:{quote(phone_clean)}" if phone_clean else "#"
+
+    active_promises = session.execute(
+        select(PromiseToPay).where(
+            PromiseToPay.tenant_id == tenant.id,
+            PromiseToPay.retailer_id == ret_uuid,
+            PromiseToPay.status == "pending",
+        ).order_by(PromiseToPay.promised_date)
+    ).scalars().all()
+
+    csrf_token = generate_csrf_token(session_rec.id, settings.secret_key)
+    msg = request.query_params.get("msg")
+
+    return templates.TemplateResponse(
+        request=request,
+        name="reminder_compose.html",
+        context={
+            "tenant": tenant,
+            "user": user,
+            "lang": lang,
+            "retailer": retailer,
+            "overdue_count": count,
+            "total_overdue_etb": to_etb(total_santim),
+            "earliest_due": earliest_due,
+            "reminder_text": reminder_text,
+            "sms_url": sms_url,
+            "tel_url": tel_url,
+            "active_promises": active_promises,
+            "csrf_token": csrf_token,
+            "msg": msg,
+        },
+    )
+
+
+@router.post("/reminders/{retailer_id}/log")
+def post_reminder_log(
+    retailer_id: str,
+    channel: str = Form("sms"),
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+    _csrf: None = Depends(verify_csrf),
+):
+    tenant, user, _ = session_info
+    if user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+    set_tenant(session, tenant.id)
+
+    try:
+        ret_uuid = uuid.UUID(retailer_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid retailer ID")
+
+    retailer = session.execute(
+        select(Retailer).where(Retailer.tenant_id == tenant.id, Retailer.id == ret_uuid)
+    ).scalar_one_or_none()
+    if not retailer:
+        raise HTTPException(status_code=404, detail="Retailer not found")
+
+    log_reminder_sent(
+        session,
+        tenant_id=tenant.id,
+        retailer_id=ret_uuid,
+        user_id=user.id,
+        channel=channel,
+    )
+    session.commit()
+
+    return RedirectResponse(
+        f"/reminders/{retailer_id}/compose?msg=Follow-up+reminder+logged+successfully",
+        status_code=303,
+    )
+
+
+@router.post("/reminders/{retailer_id}/promise")
+def post_record_promise(
+    retailer_id: str,
+    amount_etb: str = Form(...),
+    promised_date: str = Form(...),
+    notes: str = Form(""),
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+    _csrf: None = Depends(verify_csrf),
+):
+    tenant, user, _ = session_info
+    if user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+    set_tenant(session, tenant.id)
+
+    try:
+        ret_uuid = uuid.UUID(retailer_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid retailer ID")
+
+    retailer = session.execute(
+        select(Retailer).where(Retailer.tenant_id == tenant.id, Retailer.id == ret_uuid)
+    ).scalar_one_or_none()
+    if not retailer:
+        raise HTTPException(status_code=404, detail="Retailer not found")
+
+    try:
+        santim = parse_amount_santim(amount_etb)
+        if santim <= 0:
+            raise ValueError("Amount must be positive.")
+        p_date = datetime.strptime(promised_date.strip(), "%Y-%m-%d").date()
+    except (ValueError, StatementImportError) as e:
+        raise HTTPException(status_code=400, detail=f"Invalid promise parameters: {e}")
+
+    create_promise_to_pay(
+        session,
+        tenant_id=tenant.id,
+        retailer_id=ret_uuid,
+        user_id=user.id,
+        amount_santim=santim,
+        promised_date=p_date,
+        notes=notes,
+    )
+    session.commit()
+
+    return RedirectResponse(
+        f"/reminders/{retailer_id}/compose?msg=Promise+to+pay+recorded+successfully",
+        status_code=303,
+    )
+
+
+@router.post("/promises/{promise_id}/cancel")
+def post_cancel_promise(
+    promise_id: str,
+    retailer_id: str = Form(""),
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+    _csrf: None = Depends(verify_csrf),
+):
+    tenant, user, _ = session_info
+    if user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+    set_tenant(session, tenant.id)
+
+    try:
+        p_uuid = uuid.UUID(promise_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid promise ID")
+
+    try:
+        cancel_promise_to_pay(
+            session,
+            tenant_id=tenant.id,
+            promise_id=p_uuid,
+            user_id=user.id,
+        )
+        session.commit()
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    redirect_target = f"/reminders/{retailer_id}/compose?msg=Promise+cancelled" if retailer_id else "/reminders?msg=Promise+cancelled"
+    return RedirectResponse(redirect_target, status_code=303)
+
+
 # Exports (Full Data & Accountant) — Owner Only
 # ---------------------------------------------------------------------------
 @router.get("/exports/sales.csv")

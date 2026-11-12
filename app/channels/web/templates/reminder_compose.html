@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}
+  {{ t('reminders_compose_title', lang=lang) }} — {{ retailer.name }}
+{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 900px; margin: 1.5rem auto; padding: 0 1rem;">
+
+  <!-- Header -->
+  <div style="margin-bottom: 1.25rem;">
+    <a href="/reminders" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; text-decoration: none; margin-bottom: 0.5rem;">
+      <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+      <span>{% if lang == 'am' %}ወደ ማስታወሻዎች ተመለስ <!-- needs native review -->{% else %}Back to Reminders{% endif %}</span>
+    </a>
+    <h2 style="font-size: 1.35rem; font-weight: 800; color: var(--color-text-main); margin: 0;">
+      {{ t('reminders_compose_title', lang=lang) }}: {{ retailer.name }}
+    </h2>
+    <p style="font-size: 0.8125rem; color: var(--color-text-muted); margin-top: 0.25rem;">
+      {{ overdue_count }} overdue invoice(s) totaling <strong>{{ total_overdue_etb }} ETB</strong>
+    </p>
+  </div>
+
+  {% if msg %}
+    <div class="alert alert-success" style="margin-bottom: 1.25rem;">
+      {{ msg }}
+    </div>
+  {% endif %}
+
+  <!-- Grid: Left = Polite Draft & Actions, Right = Promise to Pay -->
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+
+    <!-- Card 1: Reminder Draft & Direct Actions -->
+    <div class="card">
+      <div class="card-header" style="background: #f8fafc; border-bottom: 1px solid var(--color-border-subtle);">
+        <h3 class="card-title" style="font-size: 0.9375rem; display: flex; align-items: center; gap: 0.5rem;">
+          <svg class="icon" viewBox="0 0 24 24" style="color: var(--color-primary); width: 18px; height: 18px;"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/></svg>
+          Reminder Draft
+        </h3>
+      </div>
+      <div class="card-body">
+        <label style="display: block; font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.35rem;">
+          Draft Message ({% if lang == 'am' %}Amharic{% else %}English{% endif %})
+        </label>
+        <textarea id="reminder-draft-text" readonly style="width: 100%; height: 120px; padding: 0.6rem; border: 1px solid var(--color-border-subtle); border-radius: 4px; font-size: 0.8125rem; line-height: 1.4; background: #fdfdfd; margin-bottom: 1rem;" data-testid="reminder-draft-textarea">{{ reminder_text }}</textarea>
+
+        <!-- Native Action Links (tel: and sms:) -->
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.25rem;">
+          {% if retailer.phone %}
+            <a href="{{ sms_url }}" class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 0.4rem; text-decoration: none;" data-testid="native-sms-link">
+              <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px;"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+              <span>{{ t('reminders_open_sms', lang=lang) }}</span>
+            </a>
+            <a href="{{ tel_url }}" class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 0.4rem; text-decoration: none;" data-testid="native-tel-link">
+              <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px;"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>
+              <span>{{ t('reminders_call_phone', lang=lang) }}</span>
+            </a>
+          {% else %}
+            <span style="font-size: 0.75rem; color: #b91c1c;">(Retailer has no phone number recorded)</span>
+          {% endif %}
+        </div>
+
+        <hr style="border: 0; border-top: 1px solid var(--color-border-subtle); margin: 1rem 0;">
+
+        <!-- Manual Event Logging Form (Zero personal data in payload) -->
+        <form action="/reminders/{{ retailer.id }}/log" method="POST">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div style="font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.35rem;">
+            {{ t('reminders_log_sent', lang=lang) }}
+          </div>
+          <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+            <select name="channel" style="padding: 0.35rem 0.6rem; border: 1px solid var(--color-border-subtle); border-radius: 4px; font-size: 0.8125rem;">
+              <option value="sms">SMS</option>
+              <option value="call">Phone Call</option>
+              <option value="in_person">In Person</option>
+            </select>
+            <button type="submit" class="btn btn-secondary btn-sm" data-testid="log-reminder-btn">
+              Record Follow-up
+            </button>
+          </div>
+          <small style="display: block; color: var(--color-text-muted); font-size: 0.75rem; margin-top: 0.35rem;">
+            Appends an immutable audit event without storing message text.
+          </small>
+        </form>
+
+      </div>
+    </div>
+
+    <!-- Card 2: Promise to Pay Tracker -->
+    <div class="card">
+      <div class="card-header" style="background: #f8fafc; border-bottom: 1px solid var(--color-border-subtle);">
+        <h3 class="card-title" style="font-size: 0.9375rem; display: flex; align-items: center; gap: 0.5rem;">
+          <svg class="icon" viewBox="0 0 24 24" style="color: var(--color-primary); width: 18px; height: 18px;"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11z"/></svg>
+          {{ t('reminders_promise_to_pay', lang=lang) }}
+        </h3>
+      </div>
+      <div class="card-body">
+        
+        <!-- Active Promises List -->
+        {% if active_promises %}
+          <div style="margin-bottom: 1.25rem;">
+            <div style="font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.5rem;">Current Commitments:</div>
+            {% for p in active_promises %}
+              <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; background: #f8fafc; border: 1px solid var(--color-border-subtle); border-radius: 4px; margin-bottom: 0.5rem;" data-testid="promise-item-{{ p.id }}">
+                <div>
+                  <div style="font-weight: 700; font-size: 0.8125rem;">ETB {{ p.amount_santim | format_money }}</div>
+                  <div style="font-size: 0.75rem; color: var(--color-text-muted);">
+                    Promised Date: {{ p.promised_date.strftime('%d/%m/%Y') }}
+                    {% if p.notes %}&bull; <em>{{ p.notes }}</em>{% endif %}
+                  </div>
+                </div>
+                <form action="/promises/{{ p.id }}/cancel" method="POST">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <input type="hidden" name="retailer_id" value="{{ retailer.id }}">
+                  <button type="submit" class="btn btn-danger btn-sm" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;" data-testid="cancel-promise-btn-{{ p.id }}">
+                    {{ t('reminders_cancel_promise', lang=lang) }}
+                  </button>
+                </form>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        <!-- Form: Record New Promise -->
+        <form action="/reminders/{{ retailer.id }}/promise" method="POST">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+          <div style="margin-bottom: 0.75rem;">
+            <label style="display: block; font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.25rem;">
+              Promised Amount (ETB) *
+            </label>
+            <input type="text" name="amount_etb" required value="{{ total_overdue_etb }}" style="width: 100%; padding: 0.4rem; border: 1px solid var(--color-border-subtle); border-radius: 4px; font-size: 0.8125rem;" data-testid="promise-amount-input">
+          </div>
+
+          <div style="margin-bottom: 0.75rem;">
+            <label style="display: block; font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.25rem;">
+              Promised Payment Date *
+            </label>
+            <input type="date" name="promised_date" required style="width: 100%; padding: 0.4rem; border: 1px solid var(--color-border-subtle); border-radius: 4px; font-size: 0.8125rem;" data-testid="promise-date-input">
+          </div>
+
+          <div style="margin-bottom: 1rem;">
+            <label style="display: block; font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.25rem;">
+              Notes (Optional)
+            </label>
+            <input type="text" name="notes" placeholder="e.g. Promised via phone conversation" style="width: 100%; padding: 0.4rem; border: 1px solid var(--color-border-subtle); border-radius: 4px; font-size: 0.8125rem;" data-testid="promise-notes-input">
+          </div>
+
+          <button type="submit" class="btn btn-primary" style="width: 100%;" data-testid="save-promise-btn">
+            {{ t('reminders_record_promise', lang=lang) }}
+          </button>
+        </form>
+
+      </div>
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}

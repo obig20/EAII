@@ -14,7 +14,7 @@ from typing import Sequence
 
 from sqlalchemy.orm import Session
 
-from app.kernel.money import to_etb
+from app.kernel.money import format_money, to_etb
 from app.reports.aging import AgingReport, generate_aging_report
 
 
@@ -76,6 +76,37 @@ def generate_morning_brief_text(
                 f"   Due: {ret.total_overdue_etb} | Overdue: {max_days} days",
                 f"   Invoices: {inv_nums}",
             ])
+
+    # -----------------------------------------------------------------------
+    # Promise-to-Pay Commitments (Stage 4)
+    # -----------------------------------------------------------------------
+    today_dt = as_of_date or datetime.now(timezone.utc).date()
+    from app.kernel.models import PromiseToPay, Retailer
+    from sqlalchemy import select
+
+    pending_promises = session.execute(
+        select(PromiseToPay, Retailer.name, Retailer.phone).join(
+            Retailer, Retailer.id == PromiseToPay.retailer_id
+        ).where(
+            PromiseToPay.tenant_id == tenant_id,
+            PromiseToPay.status == "pending",
+        ).order_by(PromiseToPay.promised_date)
+    ).all()
+
+    today_promises = [p for p in pending_promises if p[0].promised_date == today_dt]
+    missed_promises = [p for p in pending_promises if p[0].promised_date < today_dt]
+
+    if today_promises or missed_promises:
+        lines.extend([
+            "----------------------------------------",
+            "PROMISED PAYMENTS:",
+        ])
+        for p, r_name, r_phone in today_promises:
+            p_phone = f" ({r_phone})" if r_phone else ""
+            lines.append(f"  • [Expected Today] ETB {format_money(p.amount_santim, include_currency=False)} from {r_name}{p_phone}")
+        for p, r_name, r_phone in missed_promises:
+            p_phone = f" ({r_phone})" if r_phone else ""
+            lines.append(f"  • [MISSED PROMISE] ETB {format_money(p.amount_santim, include_currency=False)} from {r_name}{p_phone} (promised {p.promised_date.strftime('%d/%m/%Y')})")
 
     lines.extend([
         "========================================",

@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}
+  {{ t('reminders_title', lang=lang) }} — Daily Close
+{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 1050px; margin: 1.5rem auto; padding: 0 1rem;">
+
+  <!-- Header -->
+  <div style="margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+    <div>
+      <a href="/dashboard" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; text-decoration: none; margin-bottom: 0.5rem;">
+        <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+        <span>{% if lang == 'am' %}ወደ ዳሽቦርድ ተመለስ <!-- needs native review -->{% else %}Back to Dashboard{% endif %}</span>
+      </a>
+      <h2 style="font-size: 1.35rem; font-weight: 800; color: var(--color-text-main); margin: 0;">
+        {{ t('reminders_title', lang=lang) }}
+      </h2>
+      <p style="font-size: 0.8125rem; color: var(--color-text-muted); margin-top: 0.25rem;">
+        {{ t('reminders_subtitle', lang=lang) }}
+      </p>
+    </div>
+  </div>
+
+  {% if msg %}
+    <div class="alert alert-success" style="margin-bottom: 1.25rem;">
+      {{ msg }}
+    </div>
+  {% endif %}
+
+  <!-- Overdue Retailers List -->
+  <div class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-header" style="background: #f8fafc; border-bottom: 1px solid var(--color-border-subtle); display: flex; justify-content: space-between; align-items: center;">
+      <h3 class="card-title" style="font-size: 0.9375rem; display: flex; align-items: center; gap: 0.5rem;">
+        <svg class="icon" viewBox="0 0 24 24" style="color: #ef4444; width: 18px; height: 18px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+        {{ t('reminders_overdue_retailers', lang=lang) }}
+      </h3>
+      <span style="font-size: 0.75rem; color: var(--color-text-muted);">
+        {{ overdue_list|length }} {% if lang == 'am' %}ባለዕዳዎች <!-- needs native review -->{% else %}retailers{% endif %}
+      </span>
+    </div>
+    <div class="card-body">
+      {% if not overdue_list %}
+        <div style="text-align: center; padding: 2rem 1rem; color: var(--color-text-muted);">
+          <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">🎉</div>
+          <div style="font-weight: 700;">
+            {% if lang == 'am' %}ሁሉም ሂሳቦች የተከፈሉ ናቸው! <!-- needs native review -->{% else %}All accounts in good standing!{% endif %}
+          </div>
+          <div style="font-size: 0.8125rem;">
+            {% if lang == 'am' %}ምንም አይነት ጊዜ ያለፈበት የዱቤ ሂሳብ የለም። <!-- needs native review -->{% else %}Zero overdue invoices across all retailers.{% endif %}
+          </div>
+        </div>
+      {% else %}
+        <div style="overflow-x: auto;">
+          <table class="table" style="width: 100%; border-collapse: collapse; font-size: 0.8125rem;" data-testid="overdue-retailers-table">
+            <thead style="background: #f1f5f9; text-align: left;">
+              <tr>
+                <th style="padding: 0.6rem; border-bottom: 1px solid var(--color-border-subtle);">Retailer</th>
+                <th style="padding: 0.6rem; border-bottom: 1px solid var(--color-border-subtle);">Phone</th>
+                <th style="padding: 0.6rem; border-bottom: 1px solid var(--color-border-subtle);">Overdue Invoices</th>
+                <th style="padding: 0.6rem; border-bottom: 1px solid var(--color-border-subtle);">Total Overdue</th>
+                <th style="padding: 0.6rem; border-bottom: 1px solid var(--color-border-subtle);">Earliest Due</th>
+                <th style="padding: 0.6rem; border-bottom: 1px solid var(--color-border-subtle);">Promise to Pay</th>
+                <th style="padding: 0.6rem; border-bottom: 1px solid var(--color-border-subtle); text-align: right;">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for ret in overdue_list %}
+              <tr style="border-bottom: 1px solid var(--color-border-subtle);" data-testid="retailer-row-{{ ret.retailer_id }}">
+                <td style="padding: 0.6rem; font-weight: 700;">{{ ret.retailer_name }}</td>
+                <td style="padding: 0.6rem; font-family: monospace;">{{ ret.phone or '-' }}</td>
+                <td style="padding: 0.6rem;">{{ ret.overdue_count }}</td>
+                <td style="padding: 0.6rem; font-weight: 700; color: #b91c1c;">{{ ret.total_overdue_etb }} ETB</td>
+                <td style="padding: 0.6rem;">
+                  {{ ret.earliest_due_date.strftime('%d/%m/%Y') }}
+                  <span style="color: #b91c1c; font-size: 0.75rem;">({{ ret.max_overdue_days }}d overdue)</span>
+                </td>
+                <td style="padding: 0.6rem;">
+                  {% if ret.active_promise %}
+                    {% if ret.is_promise_missed %}
+                      <span class="badge badge-unverified" style="background: #fee2e2; color: #991b1b;" data-testid="badge-promise-missed">
+                        {{ t('reminders_promise_missed', lang=lang) }}: {{ ret.active_promise.promised_date.strftime('%d/%m/%Y') }}
+                      </span>
+                    {% else %}
+                      <span class="badge badge-info" data-testid="badge-promise-pending">
+                        {{ t('reminders_promise_expected', lang=lang) }}: {{ ret.active_promise.promised_date.strftime('%d/%m/%Y') }}
+                      </span>
+                    {% endif %}
+                  {% else %}
+                    <span style="color: var(--color-text-muted);">-</span>
+                  {% endif %}
+                </td>
+                <td style="padding: 0.6rem; text-align: right;">
+                  <a href="/reminders/{{ ret.retailer_id }}/compose" class="btn btn-secondary btn-sm" data-testid="compose-btn-{{ ret.retailer_id }}" style="text-decoration: none;">
+                    {% if lang == 'am' %}ማስታወሻ ያዘጋጁ <!-- needs native review -->{% else %}Follow Up &rarr;{% endif %}
+                  </a>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+{% endblock %}

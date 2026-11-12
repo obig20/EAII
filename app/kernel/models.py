@@ -591,3 +591,34 @@ class ImportBatchError(Base):
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+
+
+# ---------------------------------------------------------------------------
+# promises_to_pay (commitments from retailers to pay outstanding invoices)
+# ---------------------------------------------------------------------------
+class PromiseToPay(Base):
+    __tablename__ = "promises_to_pay"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    retailer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("retailers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    amount_santim: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    promised_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    fulfilled_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    fulfilled_payment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("payment_lines.id"), nullable=True
+    )

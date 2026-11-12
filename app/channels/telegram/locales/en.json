@@ -95,5 +95,18 @@
   "wizard_update_preview": "Update Preview",
   "wizard_save_mapping": "Save this mapping for future uploads",
   "wizard_error_report": "Download Error Report (CSV)",
-  "wizard_row_count": "{valid} valid credit payments ready to ingest, {errors} errors found"
+  "wizard_row_count": "{valid} valid credit payments ready to ingest, {errors} errors found",
+  "reminders_title": "Payment Reminders",
+  "reminders_subtitle": "Follow up on overdue credit balances and track promises to pay",
+  "reminders_overdue_retailers": "Overdue Retailers",
+  "reminders_compose_title": "Compose Reminder",
+  "reminders_log_sent": "Log Reminder Sent",
+  "reminders_promise_to_pay": "Promise to Pay",
+  "reminders_record_promise": "Record Promise to Pay",
+  "reminders_promise_expected": "Expected by",
+  "reminders_promise_missed": "Missed Promise",
+  "reminders_cancel_promise": "Cancel Promise",
+  "reminders_copy_message": "Copy Message",
+  "reminders_open_sms": "Send SMS",
+  "reminders_call_phone": "Call Retailer"
 }
