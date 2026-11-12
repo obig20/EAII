@@ -262,6 +262,15 @@
             {% if lang == 'am' %}አስገባ እና ክፍያዎችን አዛምድ{% else %}Import Today's Statement & Run Auto-Matcher{% endif %}
           </button>
         </form>
+
+        <div style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px dashed var(--color-input-border); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
+          <span style="font-size: 0.75rem; color: var(--color-text-muted);">
+            {% if lang == 'am' %}ብጁ ወይም አዲስ ፎርማት አለዎት? <!-- needs native review -->{% else %}Custom or new statement format?{% endif %}
+          </span>
+          <a href="/statements/wizard" class="btn btn-secondary btn-sm" data-testid="open-import-wizard-btn" style="text-decoration: none;">
+            {{ t('wizard_title', lang=lang) }} &rarr;
+          </a>
+        </div>
       </div>
 
       <!-- TASK 3: Review Proposed Matches -->

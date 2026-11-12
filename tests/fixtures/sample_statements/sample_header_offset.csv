@@ -1,0 +1,6 @@
+Commercial Bank Statement Export - Synthetic Sample
+Account: 100099998888
+Export Date: 2026-10-24
+Posting Date,Transaction ID,Description,Credit Amount,Counterparty Name
+24/10/2026,TX-OFF-01,Inward Transfer,18000.00,Sample Offset Shop
+25/10/2026,TX-OFF-02,Branch Deposit,22500.00,Sample Offset Mart

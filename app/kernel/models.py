@@ -530,3 +530,64 @@ class InvoiceVoidNote(Base):
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+
+
+# ---------------------------------------------------------------------------
+# tenant_import_mappings (saved statement format mappings per tenant)
+# ---------------------------------------------------------------------------
+class TenantImportMapping(Base):
+    __tablename__ = "tenant_import_mappings"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    delimiter: Mapped[str] = mapped_column(String(5), nullable=False, default=",")
+    encoding: Mapped[str] = mapped_column(String(20), nullable=False, default="utf-8")
+    header_row_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    date_column: Mapped[str] = mapped_column(String(100), nullable=False)
+    date_format: Mapped[str] = mapped_column(String(50), nullable=False, default="%Y-%m-%d")
+    amount_column: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    credit_column: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    debit_column: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    reference_column: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    narrative_column: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    counterparty_name_column: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    counterparty_account_column: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    tx_id_column: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    number_format: Mapped[str] = mapped_column(String(20), nullable=False, default="1,234.56")
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+# ---------------------------------------------------------------------------
+# import_batch_errors (row-level parse/validation errors per batch)
+# ---------------------------------------------------------------------------
+class ImportBatchError(Base):
+    __tablename__ = "import_batch_errors"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    import_batch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("import_batches.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    row_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    raw_data: Mapped[str] = mapped_column(Text, nullable=False)
+    error_reason: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )

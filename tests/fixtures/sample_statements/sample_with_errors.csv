@@ -1,0 +1,5 @@
+Date,Transaction ID,Description,Credit Amount,Counterparty
+24/10/2026,TX-ERR-01,Valid Line,10000.00,Sample Valid Store
+INVALID-DATE,TX-ERR-02,Bad Date Line,20000.00,Sample Bad Date Store
+25/10/2026,TX-ERR-03,Bad Amount Line,CORRUPT_AMOUNT,Sample Bad Amount Store
+26/10/2026,TX-ERR-04,Valid Line 2,30000.00,Sample Valid Store 2

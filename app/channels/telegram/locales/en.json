@@ -85,5 +85,15 @@
   "rematch_no_invoices": "No open invoices found matching your criteria.",
   "rematch_current_match": "Currently proposed to",
   "rematch_payment_details": "Payment Details",
-  "rematch_open_invoices": "Open Invoices"
+  "rematch_open_invoices": "Open Invoices",
+  "wizard_title": "Statement Import Wizard",
+  "wizard_subtitle": "Inspect, map, and preview statement files with automatic format detection",
+  "wizard_upload_step": "Step 1: Upload Statement",
+  "wizard_preview_step": "Step 2: Column Mapping & 20-Row Preview",
+  "wizard_ambiguous_date_warning": "Date format is ambiguous for '{sample}'. Please select Day/Month or Month/Day explicitly.",
+  "wizard_confirm_button": "Confirm & Ingest Statement",
+  "wizard_update_preview": "Update Preview",
+  "wizard_save_mapping": "Save this mapping for future uploads",
+  "wizard_error_report": "Download Error Report (CSV)",
+  "wizard_row_count": "{valid} valid credit payments ready to ingest, {errors} errors found"
 }

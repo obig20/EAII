@@ -1,0 +1,4 @@
+Date,Transaction ID,Description,Credit Amount,Debit Amount,Counterparty
+24/10/2026,TX-SPL-01,Customer Payment,35000.00,,Sample Credit Store
+24/10/2026,TX-SPL-02,Supplier Withdrawal,,5000.00,Sample Supplier
+25/10/2026,TX-SPL-03,Customer Transfer,14500.00,,Sample Buyer Mart

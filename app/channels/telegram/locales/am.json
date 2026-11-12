@@ -85,5 +85,15 @@
   "rematch_no_invoices": "ምንም ክፍት ደረሰኞች አልተገኙም። <!-- needs native review -->",
   "rematch_current_match": "በአሁኑ ጊዜ የተጠቆመው ለ <!-- needs native review -->",
   "rematch_payment_details": "የክፍያ ዝርዝር <!-- needs native review -->",
-  "rematch_open_invoices": "ክፍት ደረሰኞች <!-- needs native review -->"
+  "rematch_open_invoices": "ክፍት ደረሰኞች <!-- needs native review -->",
+  "wizard_title": "የባንክ መግለጫ ማስገቢያ ዊዛርድ <!-- needs native review -->",
+  "wizard_subtitle": "የባንክ መግለጫዎችን በራስ-ሰር ፎርማት በመለየት ይመርምሩ እና አስቀድመው ይመልከቱ <!-- needs native review -->",
+  "wizard_upload_step": "ደረጃ 1: የባንክ መግለጫ ጫን <!-- needs native review -->",
+  "wizard_preview_step": "ደረጃ 2: የአምድ ማዛመድ እና የ20-ረድፍ ቅድመ-ዕይታ <!-- needs native review -->",
+  "wizard_ambiguous_date_warning": "የቀን አጻጻፍ ለ'{sample}' አልተለየም። እባክዎ የቀን/ወር ወይም የወር/ቀን ፎርማት ይምረጡ። <!-- needs native review -->",
+  "wizard_confirm_button": "አረጋግጥ እና መግለጫውን አስገባ <!-- needs native review -->",
+  "wizard_update_preview": "ቅድመ-ዕይታውን አድስ <!-- needs native review -->",
+  "wizard_save_mapping": "ይህንን ማዛመጃ ለወደፊት ማስገቢያዎች አስቀምጥ <!-- needs native review -->",
+  "wizard_error_report": "የስህተት ሪፖርት አውርድ (CSV) <!-- needs native review -->",
+  "wizard_row_count": "{valid} ትክክለኛ ገቢ ክፍያዎች ተዘጋጅተዋል፣ {errors} ስህተቶች ተገኝተዋል <!-- needs native review -->"
 }

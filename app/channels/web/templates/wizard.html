@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+
+{% block title %}
+  {{ t('wizard_title', lang=lang) }} — Daily Close
+{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 1050px; margin: 1.5rem auto; padding: 0 1rem;">
+
+  <!-- Header -->
+  <div style="margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+    <div>
+      <a href="/dashboard" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; text-decoration: none; margin-bottom: 0.5rem;">
+        <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+        <span>{% if lang == 'am' %}ወደ ዳሽቦርድ ተመለስ <!-- needs native review -->{% else %}Back to Dashboard{% endif %}</span>
+      </a>
+      <h2 style="font-size: 1.35rem; font-weight: 800; color: var(--color-text-main); margin: 0;">
+        {{ t('wizard_title', lang=lang) }}
+      </h2>
+      <p style="font-size: 0.8125rem; color: var(--color-text-muted); margin-top: 0.25rem;">
+        {{ t('wizard_subtitle', lang=lang) }}
+      </p>
+    </div>
+  </div>
+
+  {% if step == 'upload' %}
+  <!-- STEP 1: Upload File -->
+  <div class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-header" style="background: #f8fafc; border-bottom: 1px solid var(--color-border-subtle);">
+      <h3 class="card-title" style="font-size: 0.9375rem; display: flex; align-items: center; gap: 0.5rem;">
+        <svg class="icon" viewBox="0 0 24 24" style="color: var(--color-primary); width: 18px; height: 18px;"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
+        {{ t('wizard_upload_step', lang=lang) }}
+      </h3>
+    </div>
+    <div class="card-body">
+      {% if error_msg %}
+        <div class="alert alert-danger" style="margin-bottom: 1.25rem;" data-testid="wizard-upload-error">
+          {{ error_msg }}
+        </div>
+      {% endif %}
+
+      <form action="/statements/wizard/upload" method="POST" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+        <div style="margin-bottom: 1.25rem;">
+          <label style="display: block; font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.35rem;">
+            {% if lang == 'am' %}የባንክ መግለጫ ፋይል (CSV) <!-- needs native review -->{% else %}Statement File (CSV){% endif %}
+          </label>
+          <input type="file" name="file" accept=".csv" required style="display: block; width: 100%; padding: 0.5rem; border: 1px dashed var(--color-border-subtle); border-radius: 4px; background: #fafafa;">
+          <small style="color: var(--color-text-muted); font-size: 0.75rem;">Max 10MB. Encodings supported: UTF-8, UTF-8-BOM, CP1252.</small>
+        </div>
+
+        {% if saved_mappings %}
+        <div style="margin-bottom: 1.25rem;">
+          <label style="display: block; font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.35rem;">
+            {% if lang == 'am' %}የተቀመጠ ፎርማት ተጠቀም <!-- needs native review -->{% else %}Use Saved Mapping (Optional){% endif %}
+          </label>
+          <select name="saved_mapping_id" style="width: 100%; max-width: 400px; padding: 0.4rem 0.6rem; border: 1px solid var(--color-border-subtle); border-radius: 4px;">
+            <option value="">-- {% if lang == 'am' %}በራስ-ሰር ፈልግ (Auto-detect) <!-- needs native review -->{% else %}Auto-detect format{% endif %} --</option>
+            {% for sm in saved_mappings %}
+              <option value="{{ sm.id }}">{{ sm.source_name }} ({{ sm.delimiter }} delimited, {{ sm.date_format }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %}
+
+        <div>
+          <button type="submit" class="btn btn-primary" data-testid="wizard-upload-btn">
+            {% if lang == 'am' %}ፋይል መርምር እና ቀጥል <!-- needs native review -->{% else %}Analyze & Preview{% endif %}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {% elif step == 'preview' %}
+  <!-- STEP 2: Preview & Mapping -->
+
+  <!-- Ambiguity Warning Banner -->
+  {% if result.warnings %}
+    <div class="alert alert-warning" style="margin-bottom: 1.25rem; border-left: 4px solid #f59e0b; background: #fffbeb; padding: 1rem; border-radius: 4px;" data-testid="wizard-warning-banner">
+      <div style="font-weight: 700; margin-bottom: 0.25rem; color: #92400e;">
+        {% if lang == 'am' %}ትኩረት ያስፈልጋል <!-- needs native review -->{% else %}Format Selection Required{% endif %}
+      </div>
+      {% for w in result.warnings %}
+        <div style="color: #78350f; font-size: 0.875rem;">{{ w }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <!-- Detected Format Overview -->
+  <div class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-header" style="background: #f8fafc; border-bottom: 1px solid var(--color-border-subtle); display: flex; justify-content: space-between; align-items: center;">
+      <h3 class="card-title" style="font-size: 0.9375rem;">
+        {% if lang == 'am' %}የተገኙ የፋይል ባህሪያት <!-- needs native review -->{% else %}Detected File Attributes{% endif %}
+      </h3>
+      <span style="font-size: 0.75rem; color: var(--color-text-muted);">
+        {{ result.total_data_rows }} {% if lang == 'am' %}ጠቅላላ ረድፎች <!-- needs native review -->{% else %}total rows{% endif %}
+      </span>
+    </div>
+    <div class="card-body">
+      <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <span class="badge badge-info" data-testid="badge-encoding">Encoding: {{ result.detected_format.encoding }}</span>
+        <span class="badge badge-info" data-testid="badge-delimiter">Delimiter: '{{ result.detected_format.delimiter }}'</span>
+        <span class="badge badge-info" data-testid="badge-header-idx">Header Row: #{{ result.detected_format.header_row_index + 1 }}</span>
+        <span class="badge badge-info" data-testid="badge-num-format">Numbers: {{ result.detected_format.number_format }}</span>
+        <span class="badge {% if result.detected_format.is_date_ambiguous and not selected_date_format %}badge-unverified{% else %}badge-success{% endif %}" data-testid="badge-date-format">
+          Date: {{ selected_date_format or result.detected_format.date_format or 'Ambiguous' }}
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mapping Configuration Form -->
+  <form action="/statements/wizard/confirm" method="POST" id="wizard-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="cache_token" value="{{ cache_token }}">
+    <input type="hidden" name="filename" value="{{ filename }}">
+    <input type="hidden" name="encoding" value="{{ result.detected_format.encoding }}">
+    <input type="hidden" name="delimiter" value="{{ result.detected_format.delimiter }}">
+    <input type="hidden" name="header_row_index" value="{{ result.detected_format.header_row_index }}">
+
+    <div class="card" style="margin-bottom: 1.5rem;">
+      <div class="card-header" style="background: #f8fafc; border-bottom: 1px solid var(--color-border-subtle);">
+        <h3 class="card-title" style="font-size: 0.9375rem;">
+          {{ t('wizard_preview_step', lang=lang) }}
+        </h3>
+      </div>
+      <div class="card-body">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;">
+
+          <!-- Date Column -->
+          <div>
+            <label style="display: block; font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.25rem;">Date Column *</label>
+            <select name="date_column" required style="width: 100%; padding: 0.4rem; border: 1px solid var(--color-border-subtle); border-radius: 4px;">
+              {% for h in result.detected_format.headers %}
+                <option value="{{ h }}" {% if current_mapping.get('date_column') == h %}selected{% endif %}>{{ h }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <!-- Date Format Choice -->
+          <div>
+            <label style="display: block; font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.25rem;">Date Format *</label>
+            <select name="date_format" required style="width: 100%; padding: 0.4rem; border: 1px solid var(--color-border-subtle); border-radius: 4px;" data-testid="select-date-format">
+              <option value="%Y-%m-%d" {% if (selected_date_format or result.detected_format.date_format) == '%Y-%m-%d' %}selected{% endif %}>YYYY-MM-DD (ISO)</option>
+              <option value="%d/%m/%Y" {% if (selected_date_format or result.detected_format.date_format) == '%d/%m/%Y' %}selected{% endif %}>DD/MM/YYYY (Day first)</option>
+              <option value="%m/%d/%Y" {% if (selected_date_format or result.detected_format.date_format) == '%m/%d/%Y' %}selected{% endif %}>MM/DD/YYYY (Month first)</option>
+              <option value="%d-%m-%Y" {% if (selected_date_format or result.detected_format.date_format) == '%d-%m-%Y' %}selected{% endif %}>DD-MM-YYYY</option>
+              <option value="%d-%b-%Y" {% if (selected_date_format or result.detected_format.date_format) == '%d-%b-%Y' %}selected{% endif %}>DD-Mon-YYYY (e.g. 24-Oct-2026)</option>
+              <option value="%d.%m.%Y" {% if (selected_date_format or result.detected_format.date_format) == '%d.%m.%Y' %}selected{% endif %}>DD.MM.YYYY</option>
+            </select>
+          </div>
+
+          <!-- Amount / Credit Column -->
+          <div>
+            <label style="display: block; font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.25rem;">Credit Amount Column *</label>
+            <select name="amount_column" required style="width: 100%; padding: 0.4rem; border: 1px solid var(--color-border-subtle); border-radius: 4px;">
+              {% for h in result.detected_format.headers %}
+                <option value="{{ h }}" {% if current_mapping.get('amount_column') == h or current_mapping.get('credit_column') == h %}selected{% endif %}>{{ h }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <!-- Debit Column (Optional) -->
+          <div>
+            <label style="display: block; font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.25rem;">Debit Column (Optional)</label>
+            <select name="debit_column" style="width: 100%; padding: 0.4rem; border: 1px solid var(--color-border-subtle); border-radius: 4px;">
+              <option value="">-- None (Single signed amount) --</option>
+              {% for h in result.detected_format.headers %}
+                <option value="{{ h }}" {% if current_mapping.get('debit_column') == h %}selected{% endif %}>{{ h }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <!-- Number Format -->
+          <div>
+            <label style="display: block; font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.25rem;">Number Format *</label>
+            <select name="number_format" required style="width: 100%; padding: 0.4rem; border: 1px solid var(--color-border-subtle); border-radius: 4px;">
+              <option value="1,234.56" {% if result.detected_format.number_format == '1,234.56' %}selected{% endif %}>1,234.56 (Standard)</option>
+              <option value="1.234,56" {% if result.detected_format.number_format == '1.234,56' %}selected{% endif %}>1.234,56 (European)</option>
+            </select>
+          </div>
+
+          <!-- Reference Column -->
+          <div>
+            <label style="display: block; font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.25rem;">Reference Column</label>
+            <select name="reference_column" style="width: 100%; padding: 0.4rem; border: 1px solid var(--color-border-subtle); border-radius: 4px;">
+              <option value="">-- None --</option>
+              {% for h in result.detected_format.headers %}
+                <option value="{{ h }}" {% if current_mapping.get('reference_column') == h %}selected{% endif %}>{{ h }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <!-- Narrative / Description Column -->
+          <div>
+            <label style="display: block; font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.25rem;">Narrative Column</label>
+            <select name="narrative_column" style="width: 100%; padding: 0.4rem; border: 1px solid var(--color-border-subtle); border-radius: 4px;">
+              <option value="">-- None --</option>
+              {% for h in result.detected_format.headers %}
+                <option value="{{ h }}" {% if current_mapping.get('narrative_column') == h %}selected{% endif %}>{{ h }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <!-- Counterparty Name Column -->
+          <div>
+            <label style="display: block; font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.25rem;">Counterparty Column</label>
+            <select name="counterparty_name_column" style="width: 100%; padding: 0.4rem; border: 1px solid var(--color-border-subtle); border-radius: 4px;">
+              <option value="">-- None --</option>
+              {% for h in result.detected_format.headers %}
+                <option value="{{ h }}" {% if current_mapping.get('counterparty_name_column') == h %}selected{% endif %}>{{ h }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <!-- Tx ID Column -->
+          <div>
+            <label style="display: block; font-size: 0.8125rem; font-weight: 700; margin-bottom: 0.25rem;">Transaction ID Column</label>
+            <select name="tx_id_column" style="width: 100%; padding: 0.4rem; border: 1px solid var(--color-border-subtle); border-radius: 4px;">
+              <option value="">-- None --</option>
+              {% for h in result.detected_format.headers %}
+                <option value="{{ h }}" {% if current_mapping.get('tx_id_column') == h %}selected{% endif %}>{{ h }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+        </div>
+
+        <!-- Update Preview Button (POSTs to /statements/wizard/preview) -->
+        <div style="margin-bottom: 1.5rem;">
+          <button type="submit" formaction="/statements/wizard/preview" class="btn btn-secondary btn-sm" data-testid="wizard-update-preview-btn">
+            {{ t('wizard_update_preview', lang=lang) }}
+          </button>
+        </div>
+
+        <!-- 20-Row Preview Table -->
+        <div style="margin-bottom: 1.5rem;">
+          <h4 style="font-size: 0.875rem; font-weight: 700; margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+            <span>Preview: First 20 Rows</span>
+            <span style="font-size: 0.75rem; color: var(--color-text-muted);">
+              {{ result.valid_credit_rows }} valid credits, {{ result.error_count }} issues
+            </span>
+          </h4>
+
+          <div style="overflow-x: auto; border: 1px solid var(--color-border-subtle); border-radius: 4px;">
+            <table class="table" style="width: 100%; border-collapse: collapse; font-size: 0.8125rem;" data-testid="wizard-preview-table">
+              <thead style="background: #f1f5f9; text-align: left;">
+                <tr>
+                  <th style="padding: 0.5rem; border-bottom: 1px solid var(--color-border-subtle);">#</th>
+                  <th style="padding: 0.5rem; border-bottom: 1px solid var(--color-border-subtle);">Raw Date</th>
+                  <th style="padding: 0.5rem; border-bottom: 1px solid var(--color-border-subtle);">Parsed Date</th>
+                  <th style="padding: 0.5rem; border-bottom: 1px solid var(--color-border-subtle);">Raw Amount</th>
+                  <th style="padding: 0.5rem; border-bottom: 1px solid var(--color-border-subtle);">Parsed Amount</th>
+                  <th style="padding: 0.5rem; border-bottom: 1px solid var(--color-border-subtle);">Counterparty</th>
+                  <th style="padding: 0.5rem; border-bottom: 1px solid var(--color-border-subtle);">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in result.preview_rows %}
+                <tr style="border-bottom: 1px solid var(--color-border-subtle); {% if row.error %}background: #fff1f2;{% elif not row.is_credit %}background: #f8fafc; opacity: 0.7;{% endif %}">
+                  <td style="padding: 0.5rem; font-weight: 600;">{{ row.row_index }}</td>
+                  <td style="padding: 0.5rem; font-family: monospace;">{{ row.raw_date or '-' }}</td>
+                  <td style="padding: 0.5rem;">
+                    {% if row.parsed_date %}
+                      <span style="color: #047857; font-weight: 600;">{{ row.parsed_date }}</span>
+                    {% else %}
+                      <span style="color: #b91c1c;">-</span>
+                    {% endif %}
+                  </td>
+                  <td style="padding: 0.5rem; font-family: monospace;">{{ row.raw_amount or '-' }}</td>
+                  <td style="padding: 0.5rem;">
+                    {% if row.parsed_etb %}
+                      <span style="color: #047857; font-weight: 600;">{{ row.parsed_etb }}</span>
+                    {% else %}
+                      <span style="color: #b91c1c;">-</span>
+                    {% endif %}
+                  </td>
+                  <td style="padding: 0.5rem;">{{ row.counterparty or '-' }}</td>
+                  <td style="padding: 0.5rem;">
+                    {% if row.error %}
+                      <span class="badge badge-unverified" style="background: #fee2e2; color: #991b1b;">{{ row.error }}</span>
+                    {% elif not row.is_credit %}
+                      <span class="badge" style="background: #e2e8f0; color: #475569;">Skipped Debit</span>
+                    {% else %}
+                      <span class="badge badge-success">Valid Credit</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Save Mapping Option -->
+        <div style="background: #f8fafc; padding: 1rem; border-radius: 4px; border: 1px solid var(--color-border-subtle); margin-bottom: 1.5rem;">
+          <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; font-weight: 700; cursor: pointer; margin-bottom: 0.5rem;">
+            <input type="checkbox" name="save_mapping" value="true">
+            {{ t('wizard_save_mapping', lang=lang) }}
+          </label>
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <label style="font-size: 0.75rem; color: var(--color-text-muted);">Mapping Name:</label>
+            <input type="text" name="save_mapping_as" placeholder="e.g. Dashen Branch Export" style="padding: 0.35rem 0.6rem; border: 1px solid var(--color-border-subtle); border-radius: 4px; font-size: 0.8125rem; width: 250px;">
+          </div>
+        </div>
+
+        <!-- Submit Ingest -->
+        <div>
+          <button type="submit" class="btn btn-primary" data-testid="wizard-confirm-btn" {% if result.detected_format.is_date_ambiguous and not selected_date_format %}disabled title="Explicit date format selection required"{% endif %}>
+            {{ t('wizard_confirm_button', lang=lang) }}
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </form>
+  {% endif %}
+
+</div>
+{% endblock %}

@@ -10,6 +10,7 @@ Web routes for Daily Close:
 
 from __future__ import annotations
 
+import csv
 import io
 import uuid
 import zipfile
@@ -40,6 +41,13 @@ from app.importers.mapping import (
     ColumnMappingConfig,
 )
 from app.importers.xlsx_importer import XlsxStatementImporter
+from app.importers.wizard import (
+    analyze_statement_file,
+    execute_wizard_import,
+    generate_preview,
+    DetectedFormat,
+    StatementImportError,
+)
 from app.kernel.auth import (
     create_user_session,
     generate_csrf_token,
@@ -54,7 +62,7 @@ from app.kernel.db import get_session
 from app.kernel.enums import EvidenceLevel, InvoiceState, MatchState, PaymentState, ReversalReasonCode, UserRole, VoidReasonCode
 from app.kernel.events import append_event
 from app.kernel.guards import InsufficientEvidenceError, assert_confirmable
-from app.kernel.models import Event, ImportBatch, Invoice, PaymentLine, PaymentMatch, ProcessedApprovalToken, RateLimitBucket, Retailer, ReversalNote, Session as SessionModel, Tenant, User
+from app.kernel.models import Event, ImportBatch, ImportBatchError, Invoice, PaymentLine, PaymentMatch, ProcessedApprovalToken, RateLimitBucket, Retailer, ReversalNote, Session as SessionModel, Tenant, TenantImportMapping, User
 from app.channels.telegram.i18n import t
 from app.kernel.money import format_money, to_etb
 from app.matching.context import compute_match_reconciliation_context
@@ -97,6 +105,8 @@ from app.reports.morning_brief import generate_morning_brief_text
 from app.settings import settings
 
 
+
+_WIZARD_UPLOAD_CACHE: dict[str, tuple[datetime, bytes, str, Any]] = {}
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["format_money"] = format_money
@@ -1394,6 +1404,356 @@ async def upload_statement(
 
 
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Statement Import Wizard Routes (Owner Only)
+# ---------------------------------------------------------------------------
+
+@router.get("/statements/wizard", response_class=HTMLResponse)
+def get_statement_wizard(
+    request: Request,
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+):
+    tenant, user, session_rec = session_info
+    if user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+    set_tenant(session, tenant.id)
+
+    saved_mappings = session.execute(
+        select(TenantImportMapping).where(TenantImportMapping.tenant_id == tenant.id).order_by(TenantImportMapping.source_name)
+    ).scalars().all()
+
+    lang = request.cookies.get("lang", "en")
+    csrf_token = generate_csrf_token(session_rec.id, settings.secret_key)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="wizard.html",
+        context={
+            "tenant": tenant,
+            "user": user,
+            "lang": lang,
+            "csrf_token": csrf_token,
+            "step": "upload",
+            "saved_mappings": saved_mappings,
+            "error_msg": None,
+        },
+    )
+
+
+@router.post("/statements/wizard/upload", response_class=HTMLResponse)
+async def upload_statement_wizard(
+    request: Request,
+    file: UploadFile = File(...),
+    saved_mapping_id: str = Form(""),
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+    _csrf: None = Depends(verify_csrf),
+):
+    tenant, user, session_rec = session_info
+    if user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+    set_tenant(session, tenant.id)
+    lang = request.cookies.get("lang", "en")
+    csrf_token = generate_csrf_token(session_rec.id, settings.secret_key)
+
+    safe_filename = validate_uploaded_file(file, {".csv"})
+    content = await file.read(MAX_UPLOAD_SIZE + 1)
+    if len(content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail="File too large. Maximum allowed size is 10MB.")
+    if not content or len(content.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if b"\x00" in content:
+        raise HTTPException(status_code=400, detail="Uploaded statement CSV file contains invalid null bytes.")
+
+    try:
+        detected_fmt = analyze_statement_file(content, safe_filename)
+    except StatementImportError as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to analyze statement: {exc}")
+
+    custom_mapping = dict(detected_fmt.suggested_mapping)
+    selected_date_fmt = detected_fmt.date_format
+    if saved_mapping_id:
+        try:
+            sm_uuid = uuid.UUID(saved_mapping_id)
+            saved_map = session.execute(
+                select(TenantImportMapping).where(
+                    TenantImportMapping.tenant_id == tenant.id,
+                    TenantImportMapping.id == sm_uuid,
+                )
+            ).scalar_one_or_none()
+            if saved_map:
+                detected_fmt.delimiter = saved_map.delimiter
+                detected_fmt.encoding = saved_map.encoding
+                detected_fmt.header_row_index = saved_map.header_row_index
+                detected_fmt.number_format = saved_map.number_format
+                selected_date_fmt = saved_map.date_format
+                custom_mapping = {
+                    "date_column": saved_map.date_column,
+                    "amount_column": saved_map.amount_column,
+                    "credit_column": saved_map.credit_column,
+                    "debit_column": saved_map.debit_column,
+                    "reference_column": saved_map.reference_column,
+                    "narrative_column": saved_map.narrative_column,
+                    "counterparty_name_column": saved_map.counterparty_name_column,
+                    "counterparty_account_column": saved_map.counterparty_account_column,
+                    "tx_id_column": saved_map.tx_id_column,
+                }
+        except ValueError:
+            pass
+
+    preview_res = generate_preview(content, detected_fmt, custom_mapping, override_date_format=selected_date_fmt)
+
+    cache_token = uuid.uuid4().hex
+    _WIZARD_UPLOAD_CACHE[cache_token] = (datetime.now(timezone.utc), content, safe_filename, detected_fmt)
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    to_delete = [k for k, v in _WIZARD_UPLOAD_CACHE.items() if v[0] < cutoff]
+    for k in to_delete:
+        del _WIZARD_UPLOAD_CACHE[k]
+
+    return templates.TemplateResponse(
+        request=request,
+        name="wizard.html",
+        context={
+            "tenant": tenant,
+            "user": user,
+            "lang": lang,
+            "csrf_token": csrf_token,
+            "step": "preview",
+            "result": preview_res,
+            "current_mapping": custom_mapping,
+            "selected_date_format": selected_date_fmt,
+            "cache_token": cache_token,
+            "filename": safe_filename,
+        },
+    )
+
+
+@router.post("/statements/wizard/preview", response_class=HTMLResponse)
+def update_statement_wizard_preview(
+    request: Request,
+    cache_token: str = Form(...),
+    filename: str = Form(...),
+    encoding: str = Form("utf-8"),
+    delimiter: str = Form(","),
+    header_row_index: int = Form(0),
+    date_column: str = Form(...),
+    date_format: str = Form(...),
+    amount_column: str = Form(...),
+    debit_column: str = Form(""),
+    number_format: str = Form("1,234.56"),
+    reference_column: str = Form(""),
+    narrative_column: str = Form(""),
+    counterparty_name_column: str = Form(""),
+    tx_id_column: str = Form(""),
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+    _csrf: None = Depends(verify_csrf),
+):
+    tenant, user, session_rec = session_info
+    if user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+    set_tenant(session, tenant.id)
+    lang = request.cookies.get("lang", "en")
+    csrf_token = generate_csrf_token(session_rec.id, settings.secret_key)
+
+    cached = _WIZARD_UPLOAD_CACHE.get(cache_token)
+    if not cached:
+        raise HTTPException(status_code=400, detail="Statement session expired. Please re-upload your file.")
+    _, content, _, detected_fmt = cached
+
+    detected_fmt.encoding = encoding
+    detected_fmt.delimiter = delimiter
+    detected_fmt.header_row_index = header_row_index
+    detected_fmt.number_format = number_format
+
+    custom_mapping = {
+        "date_column": date_column,
+        "amount_column": amount_column,
+        "credit_column": amount_column,
+        "debit_column": debit_column if debit_column else None,
+        "reference_column": reference_column if reference_column else None,
+        "narrative_column": narrative_column if narrative_column else None,
+        "counterparty_name_column": counterparty_name_column if counterparty_name_column else None,
+        "tx_id_column": tx_id_column if tx_id_column else None,
+    }
+
+    preview_res = generate_preview(content, detected_fmt, custom_mapping, override_date_format=date_format)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="wizard.html",
+        context={
+            "tenant": tenant,
+            "user": user,
+            "lang": lang,
+            "csrf_token": csrf_token,
+            "step": "preview",
+            "result": preview_res,
+            "current_mapping": custom_mapping,
+            "selected_date_format": date_format,
+            "cache_token": cache_token,
+            "filename": filename,
+        },
+    )
+
+
+@router.post("/statements/wizard/confirm")
+def confirm_statement_wizard(
+    request: Request,
+    cache_token: str = Form(...),
+    filename: str = Form(...),
+    date_column: str = Form(...),
+    date_format: str = Form(...),
+    amount_column: str = Form(...),
+    debit_column: str = Form(""),
+    number_format: str = Form("1,234.56"),
+    reference_column: str = Form(""),
+    narrative_column: str = Form(""),
+    counterparty_name_column: str = Form(""),
+    tx_id_column: str = Form(""),
+    save_mapping: bool = Form(False),
+    save_mapping_as: str = Form(""),
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+    _csrf: None = Depends(verify_csrf),
+):
+    tenant, user, session_rec = session_info
+    if user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+    set_tenant(session, tenant.id)
+
+    cached = _WIZARD_UPLOAD_CACHE.get(cache_token)
+    if not cached:
+        raise HTTPException(status_code=400, detail="Statement session expired. Please re-upload your file.")
+    _, content, _, detected_fmt = cached
+
+    if detected_fmt.is_date_ambiguous and not date_format:
+        raise HTTPException(status_code=400, detail="Ambiguous date format requires explicit selection.")
+
+    custom_mapping = {
+        "date_column": date_column,
+        "amount_column": amount_column,
+        "credit_column": amount_column,
+        "debit_column": debit_column if debit_column else None,
+        "reference_column": reference_column if reference_column else None,
+        "narrative_column": narrative_column if narrative_column else None,
+        "counterparty_name_column": counterparty_name_column if counterparty_name_column else None,
+        "tx_id_column": tx_id_column if tx_id_column else None,
+    }
+
+    save_name = save_mapping_as.strip() if save_mapping and save_mapping_as.strip() else None
+
+    batch, payment_lines, error_records = execute_wizard_import(
+        session,
+        tenant_id=tenant.id,
+        user_id=user.id,
+        raw_bytes=content,
+        filename=filename,
+        detected_format=detected_fmt,
+        custom_mapping=custom_mapping,
+        date_format=date_format,
+        number_format=number_format,
+        save_mapping_as=save_name,
+    )
+
+    open_invoices = session.execute(
+        select(Invoice).where(
+            Invoice.tenant_id == tenant.id,
+            Invoice.state.in_(["open", "partially_paid"]),
+        )
+    ).scalars().all()
+
+    retailers = session.execute(
+        select(Retailer).where(Retailer.tenant_id == tenant.id)
+    ).scalars().all()
+
+    matcher = PaymentMatcher()
+    auto_count = 0
+    proposed_count = 0
+
+    for pl in payment_lines:
+        res = matcher.match_payment(pl, open_invoices, retailers)
+        if getattr(pl, "is_previously_reversed", False) and res.status == "auto_confirmed":
+            res.status = "proposed"
+            res.reason += " (demoted to review queue: previously reversed payment)"
+        matcher.apply_match_results(session, pl, res, actor_id=user.id)
+        if res.status == "auto_confirmed":
+            auto_count += 1
+        elif res.status == "proposed":
+            proposed_count += 1
+
+    session.commit()
+
+    err_suffix = f" ({len(error_records)} unparseable rows flagged. Download error report below.)" if error_records else ""
+    msg = (
+        f"Statement '{filename}' imported: {len(payment_lines)} lines ingested. "
+        f"{auto_count} auto-confirmed, {proposed_count} routed to review queue.{err_suffix}"
+    )
+    if error_records:
+        msg += f" [Download Error Report](/statements/wizard/errors/{batch.id}.csv)"
+
+    return RedirectResponse(f"/?msg={quote(msg)}", status_code=303)
+
+
+@router.get("/statements/wizard/errors/{batch_id}.csv")
+def download_statement_errors_csv(
+    batch_id: str,
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+):
+    tenant, user, session_rec = session_info
+    if user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+    set_tenant(session, tenant.id)
+
+    try:
+        bid = uuid.UUID(batch_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid batch ID")
+
+    batch = session.execute(
+        select(ImportBatch).where(
+            ImportBatch.tenant_id == tenant.id,
+            ImportBatch.id == bid,
+        )
+    ).scalar_one_or_none()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Import batch not found")
+
+    errors = session.execute(
+        select(ImportBatchError).where(
+            ImportBatchError.tenant_id == tenant.id,
+            ImportBatchError.import_batch_id == bid,
+        ).order_by(ImportBatchError.row_index)
+    ).scalars().all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["row_index", "error_reason", "raw_data"])
+
+    for err in errors:
+        raw_val = err.raw_data
+        if raw_val and raw_val[0] in ("=", "+", "-", "@"):
+            raw_val = f"'{raw_val}"
+        reason_val = err.error_reason
+        if reason_val and reason_val[0] in ("=", "+", "-", "@"):
+            reason_val = f"'{reason_val}"
+        writer.writerow([err.row_index, reason_val, raw_val])
+
+    csv_data = output.getvalue()
+    filename = f"statement_errors_{bid}.csv"
+
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=\"{filename}\""},
+    )
+
+
 # Step 3: Match Approval & Review Queue Action Routes (Owner Only)
 # ---------------------------------------------------------------------------
 @router.post("/matches/{match_id}/approve")
