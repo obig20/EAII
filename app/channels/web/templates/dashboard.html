@@ -403,19 +403,34 @@
                   {% if lang == 'am' %}ቀን: <!-- needs native review -->{% else %}Date:{% endif %} {{ item.value_date }}
                 </div>
               </div>
-              <div style="text-align: right;">
-                <div style="font-weight: 800; font-size: 0.9375rem; color: var(--color-text-main);">
-                  {{ item.amount_etb }}
+              <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <div style="text-align: right;">
+                  <div style="font-weight: 800; font-size: 0.9375rem; color: var(--color-text-main);">
+                    {{ item.amount_etb }}
+                  </div>
+                  <div style="font-size: 0.6875rem; color: var(--color-text-muted);">
+                    {% if item.is_accepted_unverified %}
+                      {% if lang == 'am' %}ከሂሳብ አልተቀነሰም <!-- needs native review -->{% else %}Excluded from balances{% endif %}
+                    {% elif item.is_rejected %}
+                      {% if lang == 'am' %}በመዝገብ ውስጥ ተቀምጧል <!-- needs native review -->{% else %}Retained in records{% endif %}
+                    {% else %}
+                      {% if lang == 'am' %}እርምጃ ያስፈልጋል <!-- needs native review -->{% else %}Action required{% endif %}
+                    {% endif %}
+                  </div>
                 </div>
-                <div style="font-size: 0.6875rem; color: var(--color-text-muted);">
-                  {% if item.is_accepted_unverified %}
-                    {% if lang == 'am' %}ከሂሳብ አልተቀነሰም <!-- needs native review -->{% else %}Excluded from balances{% endif %}
-                  {% elif item.is_rejected %}
-                    {% if lang == 'am' %}በመዝገብ ውስጥ ተቀምጧል <!-- needs native review -->{% else %}Retained in records{% endif %}
-                  {% else %}
-                    {% if lang == 'am' %}እርምጃ ያስፈልጋል <!-- needs native review -->{% else %}Action required{% endif %}
-                  {% endif %}
+                {% if user_role == 'owner' %}
+                <div>
+                  <a
+                    href="/payments/{{ item.id }}/rematch"
+                    class="btn btn-secondary btn-sm"
+                    data-testid="needs-attention-rematch-{{ item.id }}"
+                    style="min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.75rem; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem;"
+                  >
+                    <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+                    <span>{{ t('rematch_from_needs_attn', lang=lang) }}</span>
+                  </a>
                 </div>
+                {% endif %}
               </div>
             </div>
             {% endfor %}

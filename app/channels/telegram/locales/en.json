@@ -75,5 +75,15 @@
   "void_reason_other": "Other reason",
   "void_success_msg": "Invoice {invoice_number} has been voided.",
   "void_blocked_confirmed_match": "Cannot void invoice with confirmed payments. Please reverse confirmed payments first.",
-  "void_and_reenter_action": "Void and Re-enter"
+  "void_and_reenter_action": "Void and Re-enter",
+  "rematch_action": "Match to different invoice",
+  "rematch_from_needs_attn": "Match to invoice",
+  "rematch_title": "Re-Match Payment",
+  "rematch_subtitle": "Select an open invoice to propose for this payment line. Approvals remain subject to verification.",
+  "rematch_select_invoice": "Match to this Invoice",
+  "rematch_search_placeholder": "Search by retailer, invoice number, or amount...",
+  "rematch_no_invoices": "No open invoices found matching your criteria.",
+  "rematch_current_match": "Currently proposed to",
+  "rematch_payment_details": "Payment Details",
+  "rematch_open_invoices": "Open Invoices"
 }

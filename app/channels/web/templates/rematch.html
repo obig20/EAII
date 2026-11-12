@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+
+{% block title %}
+  {{ t('rematch_title', lang=lang) }} — Daily Close
+{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 900px; margin: 1.5rem auto; padding: 0 1rem;">
+  
+  <!-- Back Button & Header -->
+  <div style="margin-bottom: 1.25rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+    <div>
+      <a href="/dashboard" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; text-decoration: none; margin-bottom: 0.5rem;">
+        <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+        <span>{% if lang == 'am' %}ወደ ዳሽቦርድ ተመለስ <!-- needs native review -->{% else %}Back to Dashboard{% endif %}</span>
+      </a>
+      <h2 style="font-size: 1.35rem; font-weight: 800; color: var(--color-text-main); margin: 0;">
+        {{ t('rematch_title', lang=lang) }}
+      </h2>
+      <p style="font-size: 0.8125rem; color: var(--color-text-muted); margin-top: 0.25rem;">
+        {{ t('rematch_subtitle', lang=lang) }}
+      </p>
+    </div>
+  </div>
+
+  <!-- Card: Payment Details -->
+  <div class="card" style="margin-bottom: 1.5rem;" data-testid="rematch-payment-details">
+    <div class="card-header" style="background: #f8fafc; border-bottom: 1px solid var(--color-border-subtle);">
+      <h3 class="card-title" style="font-size: 0.9375rem; display: flex; align-items: center; gap: 0.5rem;">
+        <svg class="icon" viewBox="0 0 24 24" style="color: var(--color-primary); width: 18px; height: 18px;"><path d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
+        {{ t('rematch_payment_details', lang=lang) }}
+      </h3>
+      <span class="badge {% if payment.evidence_level == 'L4' %}badge-unverified{% elif payment.evidence_level == 'L1' %}badge-success{% else %}badge-info{% endif %}">
+        {% if payment.evidence_level == 'L1' %}
+          {{ t('evidence_level_l1', lang=lang) }}
+        {% elif payment.evidence_level == 'L2' %}
+          {{ t('evidence_level_l2', lang=lang) }}
+        {% elif payment.evidence_level == 'L3' %}
+          {{ t('evidence_level_l3', lang=lang) }}
+        {% elif payment.evidence_level == 'L4' %}
+          {{ t('evidence_level_l4', lang=lang) }}
+        {% else %}
+          {{ payment.evidence_level }}
+        {% endif %}
+      </span>
+    </div>
+    <div class="card-body">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 0.75rem;">
+        <div>
+          <div style="font-size: 0.75rem; color: var(--color-text-muted); text-transform: uppercase; font-weight: 700;">Amount</div>
+          <div style="font-size: 1.25rem; font-weight: 800; color: var(--color-primary);" data-testid="rematch-payment-amount">{{ payment_amount_etb }}</div>
+        </div>
+        <div>
+          <div style="font-size: 0.75rem; color: var(--color-text-muted); text-transform: uppercase; font-weight: 700;">Value Date</div>
+          <div style="font-size: 0.9375rem; font-weight: 700;">{{ payment_value_date }}</div>
+        </div>
+        <div>
+          <div style="font-size: 0.75rem; color: var(--color-text-muted); text-transform: uppercase; font-weight: 700;">Counterparty</div>
+          <div style="font-size: 0.9375rem; font-weight: 700;">{{ payment.counterparty_name or "Unknown" }}</div>
+        </div>
+        <div>
+          <div style="font-size: 0.75rem; color: var(--color-text-muted); text-transform: uppercase; font-weight: 700;">Account / Phone</div>
+          <div style="font-size: 0.875rem; font-family: monospace;">{{ payment.counterparty_account or "N/A" }}</div>
+        </div>
+      </div>
+      <div style="font-size: 0.8125rem; background: #f1f5f9; padding: 0.5rem 0.75rem; border-radius: var(--radius-sm); color: #334155; word-break: break-all;">
+        <strong>Raw Reference:</strong> {{ payment.raw_reference or "None" }}
+      </div>
+
+      {% if current_invoice %}
+      <div style="margin-top: 0.85rem; padding: 0.65rem 0.85rem; background: #fef3c7; border: 1px solid #fde68a; border-radius: var(--radius-md); font-size: 0.8125rem; color: #92400e;">
+        <strong>{{ t('rematch_current_match', lang=lang) }}:</strong>
+        Invoice <strong>{{ current_invoice.invoice_number }}</strong> ({{ current_retailer_name }}, {{ current_invoice_amount_etb }}).
+        {% if lang == 'am' %}
+        ከዚህ በታች ሌላ ደረሰኝ ሲመርጡ ይህ የቀረበ ማዛመጃ ተተክቶ አዲስ ማዛመጃ ይፈጠራል። <!-- needs native review -->
+        {% else %}
+        Selecting a different invoice below will replace this proposed match with a new proposal.
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Search & Filter Card -->
+  <div class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-header" style="background: #f8fafc; border-bottom: 1px solid var(--color-border-subtle); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+      <h3 class="card-title" style="font-size: 0.9375rem; display: flex; align-items: center; gap: 0.5rem;">
+        <svg class="icon" viewBox="0 0 24 24" style="width: 18px; height: 18px;"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+        {{ t('rematch_open_invoices', lang=lang) }}
+      </h3>
+      <span style="font-size: 0.75rem; color: var(--color-text-muted);">
+        {{ candidate_invoices|length }} candidate(s)
+      </span>
+    </div>
+    <div class="card-body">
+      <!-- Search Form (Works with JS on or off) -->
+      <form method="GET" action="{{ rematch_url }}" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;" data-testid="rematch-search-form">
+        <input
+          type="text"
+          name="q"
+          value="{{ q or '' }}"
+          placeholder="{{ t('rematch_search_placeholder', lang=lang) }}"
+          style="flex: 1; min-width: 240px; padding: 0.5rem 0.75rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: 0.875rem;"
+          data-testid="rematch-search-input"
+        >
+        <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1rem; font-size: 0.875rem;">
+          {% if lang == 'am' %}ፈልግ <!-- needs native review -->{% else %}Search{% endif %}
+        </button>
+        {% if q %}
+        <a href="{{ rematch_url }}" class="btn btn-secondary" style="padding: 0.5rem 0.75rem; font-size: 0.875rem; text-decoration: none;">
+          {% if lang == 'am' %}አጽዳ <!-- needs native review -->{% else %}Clear{% endif %}
+        </a>
+        {% endif %}
+      </form>
+
+      <!-- Candidate Invoices List -->
+      {% if candidate_invoices %}
+      <div style="display: flex; flex-direction: column; gap: 0.75rem;" data-testid="candidate-invoices-list">
+        {% for cand in candidate_invoices %}
+        <div style="border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); padding: 1rem; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 1rem; background: #ffffff;" data-testid="candidate-invoice-{{ cand.invoice_number }}">
+          <div style="flex: 1; min-width: 250px;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.35rem;">
+              <strong style="font-size: 1rem; color: var(--color-text-main);">{{ cand.invoice_number }}</strong>
+              <span style="font-size: 0.875rem; font-weight: 700; color: #1e293b;">— {{ cand.retailer_name }}</span>
+              {% if cand.is_same_retailer %}
+                <span class="badge" style="background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; font-size: 0.7rem;">
+                  {% if lang == 'am' %}ተመሳሳይ ነጋዴ <!-- needs native review -->{% else %}Same Retailer{% endif %}
+                </span>
+              {% else %}
+                <span class="badge" style="background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; font-size: 0.7rem;">
+                  {% if lang == 'am' %}የተለየ ነጋዴ <!-- needs native review -->{% else %}Different Retailer{% endif %}
+                </span>
+              {% endif %}
+            </div>
+
+            <div style="font-size: 0.75rem; color: var(--color-text-muted); display: flex; gap: 1rem; flex-wrap: wrap;">
+              <span>Issued: <strong>{{ cand.issued_date }}</strong></span>
+              <span>Due: <strong>{{ cand.due_date }}</strong></span>
+              <span>Total: <strong>{{ cand.amount_etb }}</strong></span>
+              <span>Open Balance: <strong style="color: var(--color-primary);">{{ cand.open_etb }}</strong></span>
+            </div>
+
+            <div style="margin-top: 0.4rem; font-size: 0.8125rem;">
+              <span class="badge {% if cand.diff_santim == 0 %}badge-success{% elif cand.diff_santim > 0 %}badge-warning{% else %}badge-info{% endif %}">
+                {{ cand.diff_label }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Select / Match Button Form -->
+          <div>
+            <form method="POST" action="{{ submit_url }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="target_invoice_id" value="{{ cand.id }}">
+              <button
+                type="submit"
+                class="btn btn-primary"
+                data-testid="select-invoice-{{ cand.invoice_number }}"
+                hx-confirm="{% if lang == 'am' %}ይህንን ክፍያ ከደረሰኝ {{ cand.invoice_number }} ጋር ማዛመድ ይፈልጋሉ? <!-- needs native review -->{% else %}Match this payment to invoice {{ cand.invoice_number }}?{% endif %}"
+                style="min-height: 38px; padding: 0.4rem 0.85rem; font-size: 0.8125rem; font-weight: 700; display: inline-flex; align-items: center; gap: 0.35rem;"
+              >
+                <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+                <span>{{ t('rematch_select_invoice', lang=lang) }}</span>
+              </button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div style="padding: 2rem; text-align: center; color: var(--color-text-muted);" data-testid="rematch-no-invoices">
+        <svg class="icon" viewBox="0 0 24 24" style="width: 32px; height: 32px; color: var(--color-text-muted); margin-bottom: 0.5rem;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+        <div style="font-weight: 700;">{{ t('rematch_no_invoices', lang=lang) }}</div>
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
+
+</div>
+{% endblock %}

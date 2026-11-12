@@ -75,5 +75,15 @@
   "void_reason_other": "ሌላ ምክንያት <!-- needs native review -->",
   "void_success_msg": "ደረሰኝ {invoice_number} ውድቅ ተደርጓል። <!-- needs native review -->",
   "void_blocked_confirmed_match": "የተረጋገጠ ክፍያ ያለውን ደረሰኝ ውድቅ ማድረግ አይቻልም። እባክዎ መጀመሪያ የተረጋገጠውን ክፍያ ይመልሱ። <!-- needs native review -->",
-  "void_and_reenter_action": "ውድቅ አድርገህ እንደገና አስገባ <!-- needs native review -->"
+  "void_and_reenter_action": "ውድቅ አድርገህ እንደገና አስገባ <!-- needs native review -->",
+  "rematch_action": "ከሌላ ደረሰኝ ጋር አዛምድ <!-- needs native review -->",
+  "rematch_from_needs_attn": "ከደረሰኝ ጋር አዛምድ <!-- needs native review -->",
+  "rematch_title": "ክፍያን በድጋሚ ማዛመድ <!-- needs native review -->",
+  "rematch_subtitle": "ለዚህ ክፍያ የሚሆን ክፍት ደረሰኝ ይምረጡ። ማረጋገጫዎች አሁንም በህጉ መሰረት ይከናወናሉ። <!-- needs native review -->",
+  "rematch_select_invoice": "ከዚህ ደረሰኝ ጋር አዛምድ <!-- needs native review -->",
+  "rematch_search_placeholder": "በነጋዴ፣ ደረሰኝ ቁጥር ወይም መጠን ፈልግ... <!-- needs native review -->",
+  "rematch_no_invoices": "ምንም ክፍት ደረሰኞች አልተገኙም። <!-- needs native review -->",
+  "rematch_current_match": "በአሁኑ ጊዜ የተጠቆመው ለ <!-- needs native review -->",
+  "rematch_payment_details": "የክፍያ ዝርዝር <!-- needs native review -->",
+  "rematch_open_invoices": "ክፍት ደረሰኞች <!-- needs native review -->"
 }

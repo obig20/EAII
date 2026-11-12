@@ -1926,6 +1926,506 @@ def reject_match(
 
 
 # ---------------------------------------------------------------------------
+# Re-Match Payment Routes (Owner Only)
+# ---------------------------------------------------------------------------
+def _render_rematch_page(
+    request: Request,
+    session: Session,
+    tenant: Tenant,
+    user: User,
+    session_rec: SessionModel,
+    payment: PaymentLine,
+    current_match: PaymentMatch | None,
+    current_invoice: Invoice | None,
+    rematch_url: str,
+    submit_url: str,
+    q: str | None = None,
+) -> Response:
+    lang = request.cookies.get("preferred_lang") or "en"
+
+    # Target retailer for sorting prioritization
+    target_retailer_id = None
+    if current_invoice:
+        target_retailer_id = current_invoice.retailer_id
+    elif payment.counterparty_name:
+        cand_ret = session.execute(
+            select(Retailer).where(
+                Retailer.tenant_id == tenant.id,
+                Retailer.name.ilike(f"%{payment.counterparty_name[:8]}%"),
+            )
+        ).scalars().first()
+        if cand_ret:
+            target_retailer_id = cand_ret.id
+
+    # Query open invoices (exclude void and settled)
+    stmt = (
+        select(Invoice, Retailer)
+        .join(Retailer, Invoice.retailer_id == Retailer.id)
+        .where(
+            Invoice.tenant_id == tenant.id,
+            Invoice.state.in_([InvoiceState.OPEN.value, InvoiceState.PARTIALLY_PAID.value]),
+        )
+    )
+    if current_invoice:
+        stmt = stmt.where(Invoice.id != current_invoice.id)
+
+    if q and q.strip():
+        term = f"%{q.strip()}%"
+        conditions = [
+            Invoice.invoice_number.ilike(term),
+            Retailer.name.ilike(term),
+        ]
+        cleaned_q = q.strip().replace(",", "")
+        try:
+            amt = float(cleaned_q)
+            santim_val = int(round(amt * 100))
+            conditions.append(Invoice.amount_santim == santim_val)
+        except ValueError:
+            pass
+        stmt = stmt.where(or_(*conditions))
+
+    # Prioritize same retailer, then closest amount, then recent issue date
+    order_clauses = []
+    if target_retailer_id:
+        order_clauses.append(case((Invoice.retailer_id == target_retailer_id, 0), else_=1).asc())
+    order_clauses.append(func.abs(Invoice.amount_santim - payment.amount_santim).asc())
+    order_clauses.append(Invoice.issued_date.desc())
+    stmt = stmt.order_by(*order_clauses).limit(30)
+
+    rows = session.execute(stmt).all()
+    candidate_invoices = []
+    for inv, ret in rows:
+        inv_paid = session.execute(
+            select(func.coalesce(func.sum(PaymentMatch.matched_santim), 0))
+            .where(
+                PaymentMatch.invoice_id == inv.id,
+                PaymentMatch.state == MatchState.CONFIRMED.value,
+            )
+        ).scalar_one()
+        open_santim = max(0, inv.amount_santim - int(inv_paid))
+        if open_santim <= 0:
+            continue
+
+        diff_santim = payment.amount_santim - open_santim
+        if diff_santim == 0:
+            diff_label = "Exact Match (0.00 ETB diff)"
+        elif diff_santim > 0:
+            diff_label = f"Overpayment (+{format_money(diff_santim, include_currency=True)})"
+        else:
+            diff_label = f"Partial Payment (-{format_money(abs(diff_santim), include_currency=True)})"
+
+        is_same = bool(target_retailer_id and inv.retailer_id == target_retailer_id)
+
+        candidate_invoices.append({
+            "id": str(inv.id),
+            "invoice_number": inv.invoice_number,
+            "retailer_name": ret.name,
+            "retailer_phone": ret.phone or "N/A",
+            "amount_etb": format_money(inv.amount_santim, include_currency=True),
+            "open_etb": format_money(open_santim, include_currency=True),
+            "issued_date": inv.issued_date.strftime("%d/%m/%Y") if inv.issued_date else "N/A",
+            "due_date": inv.due_date.strftime("%d/%m/%Y") if inv.due_date else "N/A",
+            "is_same_retailer": is_same,
+            "diff_santim": diff_santim,
+            "diff_label": diff_label,
+        })
+
+    csrf_token = generate_csrf_token(session_rec.id, settings.secret_key)
+    ctx = {
+        "request": request,
+        "lang": lang,
+        "user_role": user.role,
+        "is_demo": getattr(tenant, "is_demo", False),
+        "csrf_token": csrf_token,
+        "payment": payment,
+        "payment_amount_etb": format_money(payment.amount_santim, include_currency=True),
+        "payment_value_date": payment.value_date.strftime("%d/%m/%Y") if payment.value_date else "N/A",
+        "current_match": current_match,
+        "current_invoice": current_invoice,
+        "current_retailer_name": current_invoice.retailer.name if (current_invoice and current_invoice.retailer) else "N/A",
+        "current_invoice_amount_etb": format_money(current_invoice.amount_santim, include_currency=True) if current_invoice else "0.00 ETB",
+        "candidate_invoices": candidate_invoices,
+        "rematch_url": rematch_url,
+        "submit_url": submit_url,
+        "q": q,
+        "t": t,
+    }
+    return templates.TemplateResponse(request=request, name="rematch.html", context=ctx)
+
+
+@router.get("/matches/{match_id}/rematch", response_class=HTMLResponse)
+def get_rematch_match(
+    match_id: str,
+    request: Request,
+    q: str | None = None,
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+):
+    tenant, user, session_rec = session_info
+    if user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+    set_tenant(session, tenant.id)
+
+    try:
+        mid = uuid.UUID(match_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid match ID")
+
+    pm = session.get(PaymentMatch, mid)
+    if not pm or pm.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    if pm.state == MatchState.CONFIRMED.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot rematch a confirmed match. Please reverse the match first.",
+        )
+
+    pl = pm.payment_line
+    return _render_rematch_page(
+        request=request,
+        session=session,
+        tenant=tenant,
+        user=user,
+        session_rec=session_rec,
+        payment=pl,
+        current_match=pm,
+        current_invoice=pm.invoice,
+        rematch_url=f"/matches/{match_id}/rematch",
+        submit_url=f"/matches/{match_id}/rematch",
+        q=q,
+    )
+
+
+@router.post("/matches/{match_id}/rematch")
+def post_rematch_match(
+    match_id: str,
+    request: Request,
+    target_invoice_id: str = Form(...),
+    session: Session = Depends(get_session),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+    _csrf: None = Depends(verify_csrf),
+):
+    tenant, user = owner_context
+    set_tenant(session, tenant.id)
+
+    try:
+        mid = uuid.UUID(match_id)
+        target_inv_id = uuid.UUID(target_invoice_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid UUID format")
+
+    # Lock target invoice and verify tenant isolation
+    target_inv = session.execute(
+        select(Invoice)
+        .where(Invoice.id == target_inv_id, Invoice.tenant_id == tenant.id)
+        .with_for_update()
+    ).scalar_one_or_none()
+
+    if not target_inv:
+        raise HTTPException(status_code=404, detail="Target invoice not found in this tenant")
+
+    if target_inv.state in (InvoiceState.VOID.value, InvoiceState.SETTLED.value):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot match to a {target_inv.state} invoice.",
+        )
+
+    # Lock old match
+    old_pm = session.execute(
+        select(PaymentMatch)
+        .where(PaymentMatch.id == mid, PaymentMatch.tenant_id == tenant.id)
+        .with_for_update()
+    ).scalar_one_or_none()
+
+    if not old_pm:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    if old_pm.state == MatchState.CONFIRMED.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot rematch a confirmed match. Please reverse the match first.",
+        )
+
+    # Lock payment line
+    pl = session.execute(
+        select(PaymentLine)
+        .where(PaymentLine.id == old_pm.payment_line_id, PaymentLine.tenant_id == tenant.id)
+        .with_for_update()
+    ).scalar_one()
+
+    # Idempotency / Double submission check
+    existing_proposed = session.execute(
+        select(PaymentMatch).where(
+            PaymentMatch.payment_line_id == pl.id,
+            PaymentMatch.invoice_id == target_inv.id,
+            PaymentMatch.tenant_id == tenant.id,
+            PaymentMatch.state == MatchState.PROPOSED.value,
+        )
+    ).scalars().first()
+    if existing_proposed:
+        if request.headers.get("HX-Request") == "true":
+            resp = Response(status_code=status.HTTP_200_OK)
+            resp.headers["HX-Redirect"] = f"/dashboard#match-card-{existing_proposed.id}"
+            return resp
+        return RedirectResponse(
+            url=f"/dashboard#match-card-{existing_proposed.id}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    # Reject old match with event
+    now = datetime.now(timezone.utc)
+    old_pm.state = MatchState.REJECTED.value
+    append_event(
+        session,
+        tenant_id=tenant.id,
+        event_type="match.rejected",
+        aggregate_type="payment_match",
+        aggregate_id=old_pm.id,
+        actor_id=user.id,
+        payload={
+            "reason": "replaced_by_owner",
+            "payment_match_id": str(old_pm.id),
+            "payment_line_id": str(pl.id),
+            "replaced_by_invoice_id": str(target_inv.id),
+        },
+    )
+
+    # Create new proposed match (NEVER auto-confirms silently)
+    new_match = PaymentMatch(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        payment_line_id=pl.id,
+        invoice_id=target_inv.id,
+        matched_santim=min(pl.amount_santim, target_inv.amount_santim),
+        tier="manual",
+        state=MatchState.PROPOSED.value,
+        created_at=now,
+    )
+    session.add(new_match)
+    pl.state = PaymentState.PROPOSED.value
+
+    append_event(
+        session,
+        tenant_id=tenant.id,
+        event_type="match.proposed",
+        aggregate_type="payment_match",
+        aggregate_id=new_match.id,
+        actor_id=user.id,
+        payload={
+            "payment_match_id": str(new_match.id),
+            "payment_line_id": str(pl.id),
+            "invoice_id": str(target_inv.id),
+            "source": "owner_rematch",
+            "matched_santim": new_match.matched_santim,
+        },
+    )
+    session.commit()
+
+    if request.headers.get("HX-Request") == "true":
+        resp = Response(status_code=status.HTTP_200_OK)
+        resp.headers["HX-Redirect"] = f"/dashboard#match-card-{new_match.id}"
+        return resp
+
+    return RedirectResponse(
+        url=f"/dashboard#match-card-{new_match.id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.get("/payments/{payment_id}/rematch", response_class=HTMLResponse)
+def get_rematch_payment(
+    payment_id: str,
+    request: Request,
+    q: str | None = None,
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+):
+    tenant, user, session_rec = session_info
+    if user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+    set_tenant(session, tenant.id)
+
+    try:
+        pid = uuid.UUID(payment_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid payment ID")
+
+    pl = session.get(PaymentLine, pid)
+    if not pl or pl.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="Payment line not found")
+
+    if pl.state == PaymentState.CONFIRMED.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Payment is already confirmed. Reversal required to rematch.",
+        )
+
+    # Check for existing proposed match
+    pm = session.execute(
+        select(PaymentMatch).where(
+            PaymentMatch.payment_line_id == pl.id,
+            PaymentMatch.tenant_id == tenant.id,
+            PaymentMatch.state == MatchState.PROPOSED.value,
+        )
+    ).scalars().first()
+
+    return _render_rematch_page(
+        request=request,
+        session=session,
+        tenant=tenant,
+        user=user,
+        session_rec=session_rec,
+        payment=pl,
+        current_match=pm,
+        current_invoice=pm.invoice if pm else None,
+        rematch_url=f"/payments/{payment_id}/rematch",
+        submit_url=f"/payments/{payment_id}/rematch",
+        q=q,
+    )
+
+
+@router.post("/payments/{payment_id}/rematch")
+def post_rematch_payment(
+    payment_id: str,
+    request: Request,
+    target_invoice_id: str = Form(...),
+    session: Session = Depends(get_session),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+    _csrf: None = Depends(verify_csrf),
+):
+    tenant, user = owner_context
+    set_tenant(session, tenant.id)
+
+    try:
+        pid = uuid.UUID(payment_id)
+        target_inv_id = uuid.UUID(target_invoice_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid UUID format")
+
+    # Lock target invoice and verify tenant isolation
+    target_inv = session.execute(
+        select(Invoice)
+        .where(Invoice.id == target_inv_id, Invoice.tenant_id == tenant.id)
+        .with_for_update()
+    ).scalar_one_or_none()
+
+    if not target_inv:
+        raise HTTPException(status_code=404, detail="Target invoice not found in this tenant")
+
+    if target_inv.state in (InvoiceState.VOID.value, InvoiceState.SETTLED.value):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot match to a {target_inv.state} invoice.",
+        )
+
+    # Lock payment line
+    pl = session.execute(
+        select(PaymentLine)
+        .where(PaymentLine.id == pid, PaymentLine.tenant_id == tenant.id)
+        .with_for_update()
+    ).scalar_one_or_none()
+
+    if not pl:
+        raise HTTPException(status_code=404, detail="Payment line not found")
+
+    if pl.state == PaymentState.CONFIRMED.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Payment is already confirmed. Reversal required to rematch.",
+        )
+
+    # Check if there is an existing proposed match
+    old_pm = session.execute(
+        select(PaymentMatch)
+        .where(
+            PaymentMatch.payment_line_id == pl.id,
+            PaymentMatch.tenant_id == tenant.id,
+            PaymentMatch.state == MatchState.PROPOSED.value,
+        )
+        .with_for_update()
+    ).scalars().first()
+
+    # Idempotency / Double submission check
+    existing_proposed = session.execute(
+        select(PaymentMatch).where(
+            PaymentMatch.payment_line_id == pl.id,
+            PaymentMatch.invoice_id == target_inv.id,
+            PaymentMatch.tenant_id == tenant.id,
+            PaymentMatch.state == MatchState.PROPOSED.value,
+        )
+    ).scalars().first()
+    if existing_proposed:
+        if request.headers.get("HX-Request") == "true":
+            resp = Response(status_code=status.HTTP_200_OK)
+            resp.headers["HX-Redirect"] = f"/dashboard#match-card-{existing_proposed.id}"
+            return resp
+        return RedirectResponse(
+            url=f"/dashboard#match-card-{existing_proposed.id}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    now = datetime.now(timezone.utc)
+    if old_pm:
+        old_pm.state = MatchState.REJECTED.value
+        append_event(
+            session,
+            tenant_id=tenant.id,
+            event_type="match.rejected",
+            aggregate_type="payment_match",
+            aggregate_id=old_pm.id,
+            actor_id=user.id,
+            payload={
+                "reason": "replaced_by_owner",
+                "payment_match_id": str(old_pm.id),
+                "payment_line_id": str(pl.id),
+                "replaced_by_invoice_id": str(target_inv.id),
+            },
+        )
+
+    # Create new proposed match (NEVER auto-confirms silently)
+    new_match = PaymentMatch(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        payment_line_id=pl.id,
+        invoice_id=target_inv.id,
+        matched_santim=min(pl.amount_santim, target_inv.amount_santim),
+        tier="manual",
+        state=MatchState.PROPOSED.value,
+        created_at=now,
+    )
+    session.add(new_match)
+    pl.state = PaymentState.PROPOSED.value
+
+    append_event(
+        session,
+        tenant_id=tenant.id,
+        event_type="match.proposed",
+        aggregate_type="payment_match",
+        aggregate_id=new_match.id,
+        actor_id=user.id,
+        payload={
+            "payment_match_id": str(new_match.id),
+            "payment_line_id": str(pl.id),
+            "invoice_id": str(target_inv.id),
+            "source": "owner_rematch",
+            "matched_santim": new_match.matched_santim,
+        },
+    )
+    session.commit()
+
+    if request.headers.get("HX-Request") == "true":
+        resp = Response(status_code=status.HTTP_200_OK)
+        resp.headers["HX-Redirect"] = f"/dashboard#match-card-{new_match.id}"
+        return resp
+
+    return RedirectResponse(
+        url=f"/dashboard#match-card-{new_match.id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Reports & Plain-Text Morning Brief
 # ---------------------------------------------------------------------------
 @router.get("/brief", response_class=PlainTextResponse)
