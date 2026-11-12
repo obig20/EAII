@@ -3213,6 +3213,17 @@ def view_balance_confirmation(
     except TokenError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    # Log viewed event with zero personal data (Stage 5 pilot metrics requirement)
+    append_event(
+        session,
+        tenant_id=token_rec.tenant_id,
+        event_type="retailer_token.viewed",
+        aggregate_type="retailer_confirmation_token",
+        aggregate_id=token_rec.id,
+        payload={"token_id": str(token_rec.id)},
+    )
+    session.commit()
+
     tenant = session.get(Tenant, token_rec.tenant_id)
     total_santim = sum(inv.amount_santim for inv in invoices)
     today = datetime.now(timezone.utc).date()

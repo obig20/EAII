@@ -622,3 +622,30 @@ class PromiseToPay(Base):
     fulfilled_payment_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("payment_lines.id"), nullable=True
     )
+
+
+# ---------------------------------------------------------------------------
+# pilot_snapshots (point-in-time baseline and audit snapshots)
+# ---------------------------------------------------------------------------
+class PilotSnapshot(Base):
+    __tablename__ = "pilot_snapshots"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    snapshot_type: Mapped[str] = mapped_column(String(50), nullable=False, default="baseline")
+    total_credit_sales_santim: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    total_overdue_santim: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    invoice_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    retailer_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    metrics_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )

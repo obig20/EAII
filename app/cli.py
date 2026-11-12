@@ -419,6 +419,109 @@ def cli_release_gate(args: argparse.Namespace) -> int:
     return 0
 
 
+
+
+def cli_pilot_baseline(args: argparse.Namespace) -> int:
+    """Capture a point-in-time baseline snapshot of a tenant portfolio."""
+    from app.kernel.money import to_etb
+    from app.reports.pilot_metrics import capture_pilot_baseline
+
+    tenant_id_str = args.tenant_id.strip()
+    try:
+        tid = uuid.UUID(tenant_id_str)
+    except ValueError:
+        print("Error: Invalid tenant UUID format.", file=sys.stderr)
+        return 1
+
+    with session_scope() as session:
+        tenant = session.get(Tenant, tid)
+        if not tenant:
+            print(f"Error: Tenant {tid} not found.", file=sys.stderr)
+            return 1
+
+        set_tenant(session, tid)
+        snapshot = capture_pilot_baseline(session, tenant_id=tid)
+
+        print("Successfully captured Pilot Baseline Snapshot:")
+        print(f"  Snapshot ID:       {snapshot.id}")
+        print(f"  Tenant:            {tenant.name} ({tenant.id})")
+        print(f"  Snapshot Date:     {snapshot.snapshot_date}")
+        print(f"  Total Invoices:    {snapshot.invoice_count}")
+        print(f"  Total Retailers:   {snapshot.retailer_count}")
+        print(f"  Credit Sales:      {to_etb(snapshot.total_credit_sales_santim)}")
+        print(f"  Overdue Balance:   {to_etb(snapshot.total_overdue_santim)}")
+        return 0
+
+
+def cli_pilot_metrics(args: argparse.Namespace) -> int:
+    """Generate comprehensive pilot operational audit report (HTML)."""
+    from datetime import datetime
+    from pathlib import Path
+    from app.reports.pilot_metrics import compute_pilot_metrics, generate_pilot_metrics_html
+
+    tenant_id_str = args.tenant_id.strip()
+    try:
+        tid = uuid.UUID(tenant_id_str)
+    except ValueError:
+        print("Error: Invalid tenant UUID format.", file=sys.stderr)
+        return 1
+
+    from_str = getattr(args, "from_date", None)
+    to_str = getattr(args, "to_date", None)
+
+    if not from_str or not to_str:
+        print("Error: Both --from and --to dates are required.", file=sys.stderr)
+        return 1
+
+    try:
+        from_date = datetime.strptime(from_str.strip(), "%Y-%m-%d").date()
+        to_date = datetime.strptime(to_str.strip(), "%Y-%m-%d").date()
+    except ValueError:
+        print("Error: Dates must be formatted as YYYY-MM-DD.", file=sys.stderr)
+        return 1
+
+    if from_date > to_date:
+        print("Error: --from date cannot be later than --to date.", file=sys.stderr)
+        return 1
+
+    out_path = Path(args.out.strip())
+
+    with session_scope() as session:
+        tenant = session.get(Tenant, tid)
+        if not tenant:
+            print(f"Error: Tenant {tid} not found.", file=sys.stderr)
+            return 1
+
+        set_tenant(session, tid)
+        metrics_data = compute_pilot_metrics(
+            session,
+            tenant_id=tid,
+            from_date=from_date,
+            to_date=to_date,
+        )
+
+        html_output = generate_pilot_metrics_html(metrics_data, tenant_name=tenant.name)
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(html_output)
+
+        m = metrics_data["metrics"]
+        print("Successfully generated Pilot Metrics Report:")
+        print(f"  Tenant:                {tenant.name} ({tenant.id})")
+        print(f"  Window:                {from_date} to {to_date}")
+        print(f"  Output HTML:           {out_path.resolve()}")
+        print("  Summary Indicators:")
+        print(f"    - Log Velocity:       {m['log_velocity']['value']} (N={m['log_velocity']['sample_size']}, gaps: {m['log_velocity']['sequence_gaps']})")
+        print(f"    - Turnaround:         {m['turnaround']['value']} (N={m['turnaround']['sample_size']})")
+        print(f"    - Overdue Trajectory: {m['overdue_trajectory']['value']} (N={m['overdue_trajectory']['sample_size']}, baseline N={m['overdue_trajectory']['baseline_sample_size']})")
+        print(f"    - Decision Time:      {m['review_queue']['value']} (depth: {m['review_queue']['current_queue_depth']}, N={m['review_queue']['sample_size']})")
+        print(f"    - Auto-Confirm Share: {m['auto_confirm_share']['value']} (N={m['auto_confirm_share']['sample_size']})")
+        print(f"    - Reversal Rate:      {m['reversal_rate']['value']} (N={m['reversal_rate']['sample_size']})")
+        print(f"    - Retailer Links:     {m['retailer_links']['value']} (N={m['retailer_links']['sample_size']})")
+        print(f"    - Active Days:        {m['active_days']['value']} (N={m['active_days']['sample_size']})")
+        return 0
+
 def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -480,6 +583,20 @@ def main() -> None:
     # release-gate
     p_gate = subparsers.add_parser("release-gate", help="Run full release gate verification")
     p_gate.set_defaults(func=cli_release_gate)
+
+    # pilot-baseline
+    p_base = subparsers.add_parser("pilot-baseline", help="Capture a point-in-time baseline snapshot")
+    p_base.add_argument("--tenant-id", required=True, help="Tenant UUID")
+    p_base.set_defaults(func=cli_pilot_baseline)
+
+    # pilot-metrics
+    p_pm = subparsers.add_parser("pilot-metrics", help="Generate comprehensive pilot metrics audit report")
+    p_pm.add_argument("--tenant-id", required=True, help="Tenant UUID")
+    p_pm.add_argument("--from", dest="from_date", required=True, help="Start date (YYYY-MM-DD)")
+    p_pm.add_argument("--to", dest="to_date", required=True, help="End date (YYYY-MM-DD)")
+    p_pm.add_argument("--out", default="metrics.html", help="Output HTML file path (default: metrics.html)")
+    p_pm.set_defaults(func=cli_pilot_metrics)
+
 
 
     args = parser.parse_args()
