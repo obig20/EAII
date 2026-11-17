@@ -428,7 +428,7 @@
                   </div>
                 </div>
                 {% if user_role == 'owner' %}
-                <div>
+                <div style="display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap;">
                   <a
                     href="/payments/{{ item.id }}/rematch"
                     class="btn btn-secondary btn-sm"
@@ -438,6 +438,33 @@
                     <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
                     <span>{{ t('rematch_from_needs_attn', lang=lang) }}</span>
                   </a>
+
+                  {% if item.counterparty_name or item.raw_reference %}
+                  <details style="display: inline-block;">
+                    <summary class="btn btn-secondary btn-sm" style="min-height: 32px; padding: 0.2rem 0.5rem; font-size: 0.75rem; cursor: pointer; display: inline-flex; align-items: center; gap: 0.25rem;" data-testid="needs-attention-link-payer-{{ item.id }}">
+                      <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+                      <span>{% if lang == 'am' %}ከፋይ አገናኝ <!-- needs native review -->{% else %}Link Payer{% endif %}</span>
+                    </summary>
+                    <form method="POST" action="/payer-aliases" style="position: absolute; right: 1rem; z-index: 20; background: #fff; padding: 0.75rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); box-shadow: var(--shadow-md); display: flex; flex-direction: column; gap: 0.4rem; min-width: 220px;" data-testid="needs-attention-payer-form-{{ item.id }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <input type="hidden" name="payment_id" value="{{ item.id }}">
+                      <input type="hidden" name="raw_payer_name" value="{{ item.counterparty_name or '' }}">
+                      <input type="hidden" name="raw_payer_ref" value="{{ item.counterparty_account or item.raw_reference or '' }}">
+                      <div style="font-size: 0.75rem; font-weight: 700; color: var(--color-text-main);">
+                        {% if lang == 'am' %}ይህ ከፋይ የዚህ ነጋዴ ነው: <!-- needs native review -->{% else %}This payer belongs to:{% endif %}
+                      </div>
+                      <select name="retailer_id" required style="font-size: 0.75rem; padding: 0.3rem 0.5rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: #fff;">
+                        <option value="">-- {% if lang == 'am' %}ነጋዴ ይምረጡ <!-- needs native review -->{% else %}Select Retailer{% endif %} --</option>
+                        {% for ret in retailers %}
+                        <option value="{{ ret.id }}">{{ ret.name }}</option>
+                        {% endfor %}
+                      </select>
+                      <button type="submit" class="btn btn-primary btn-sm" style="font-size: 0.75rem; padding: 0.3rem 0.5rem; font-weight: 700;">
+                        {% if lang == 'am' %}አገናኝ <!-- needs native review -->{% else %}Link Payer{% endif %}
+                      </button>
+                    </form>
+                  </details>
+                  {% endif %}
                 </div>
                 {% endif %}
               </div>

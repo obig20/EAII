@@ -108,5 +108,9 @@
   "reminders_cancel_promise": "Cancel Promise",
   "reminders_copy_message": "Copy Message",
   "reminders_open_sms": "Send SMS",
-  "reminders_call_phone": "Call Retailer"
+  "reminders_call_phone": "Call Retailer",
+  "payer_memory_title": "Payer Memory",
+  "payer_memory_link_payer": "Link Payer",
+  "payer_memory_known_payer": "Known payer, you confirmed on {date}",
+  "payer_memory_belongs_to": "This payer belongs to [retailer]"
 }

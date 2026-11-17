@@ -649,3 +649,36 @@ class PilotSnapshot(Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+
+
+# ---------------------------------------------------------------------------
+# payer_aliases (third-party payment memory per retailer)
+# ---------------------------------------------------------------------------
+class PayerAlias(Base):
+    __tablename__ = "payer_aliases"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    retailer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("retailers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    normalized_payer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    normalized_payer_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    raw_payer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    raw_payer_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+
+    retailer: Mapped["Retailer"] = relationship("Retailer")
+    creator: Mapped["User"] = relationship("User")

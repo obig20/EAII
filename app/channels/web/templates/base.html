@@ -71,6 +71,9 @@
         </span>
 
         {% if user_role == 'owner' %}
+        <a href="/payer-aliases" class="lang-toggle" style="background: #1e293b; color: #e2e8f0;">
+          {% if lang == 'am' %}የከፋይ ማስታወሻ <!-- needs native review -->{% else %}Payer Memory{% endif %}
+        </a>
         <a href="/settings/users" class="lang-toggle" style="background: #1e293b; color: #e2e8f0;">
           {% if lang == 'am' %}ተጠቃሚዎች{% else %}Users{% endif %}
         </a>

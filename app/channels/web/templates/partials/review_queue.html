@@ -352,6 +352,36 @@
               <span>{{ t('rematch_action', lang=lang) }}</span>
             </a>
             {% endif %}
+
+            <!-- Payer Memory: This payer belongs to [retailer] -->
+            {% if item.counterparty_name or item.counterparty_account or item.raw_reference %}
+            <details class="payer-alias-action" style="margin-top: 0.5rem; border: 1px dashed var(--color-border); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem; background: #fafafa;">
+              <summary style="font-size: 0.75rem; font-weight: 700; color: var(--color-primary); cursor: pointer; display: flex; align-items: center; gap: 0.35rem;" data-testid="payer-memory-toggle-{{ item.match_id or item.payment_id }}">
+                <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px;"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+                <span>{% if lang == 'am' %}ይህ ከፋይ የዚህ ነጋዴ ነው <!-- needs native review -->{% else %}This payer belongs to [retailer]{% endif %}</span>
+              </summary>
+              <form method="POST" action="/payer-aliases" style="margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.4rem;" data-testid="payer-alias-form-{{ item.match_id or item.payment_id }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="payment_id" value="{{ item.payment_id }}">
+                <input type="hidden" name="raw_payer_name" value="{{ item.counterparty_name or '' }}">
+                <input type="hidden" name="raw_payer_ref" value="{{ item.counterparty_account or item.raw_reference or '' }}">
+                <div style="font-size: 0.7rem; color: var(--color-text-muted);">
+                  {% if lang == 'am' %}ከፋይ: <!-- needs native review -->{% else %}Payer:{% endif %} <strong>{{ item.counterparty_name or 'N/A' }}</strong> ({{ item.counterparty_account or item.raw_reference or 'No ref' }})
+                </div>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                  <select name="retailer_id" required style="flex: 1; font-size: 0.75rem; padding: 0.3rem 0.5rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: #fff;" data-testid="payer-alias-retailer-select">
+                    <option value="">-- {% if lang == 'am' %}ነጋዴ ይምረጡ <!-- needs native review -->{% else %}Select Retailer{% endif %} --</option>
+                    {% for ret in retailers %}
+                    <option value="{{ ret.id }}" {% if item.target_invoice and item.target_invoice.retailer_id == ret.id %}selected{% endif %}>{{ ret.name }}</option>
+                    {% endfor %}
+                  </select>
+                  <button type="submit" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 0.3rem 0.6rem; font-weight: 700; white-space: nowrap;" data-testid="save-payer-alias-button">
+                    {% if lang == 'am' %}አገናኝ <!-- needs native review -->{% else %}Link Payer{% endif %}
+                  </button>
+                </div>
+              </form>
+            </details>
+            {% endif %}
           {% else %}
             <div style="font-size: 0.75rem; color: var(--color-text-muted); background: #f1f5f9; padding: 0.65rem; border-radius: var(--radius-md); text-align: center; width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
               <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px; color: var(--color-text-muted);"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>

@@ -62,7 +62,13 @@ from app.kernel.db import get_session
 from app.kernel.enums import EvidenceLevel, InvoiceState, MatchState, PaymentState, ReversalReasonCode, UserRole, VoidReasonCode
 from app.kernel.events import append_event
 from app.kernel.guards import InsufficientEvidenceError, assert_confirmable
-from app.kernel.models import Event, ImportBatch, ImportBatchError, Invoice, PaymentLine, PaymentMatch, ProcessedApprovalToken, PromiseToPay, RateLimitBucket, Retailer, ReversalNote, Session as SessionModel, Tenant, TenantImportMapping, User
+from app.kernel.models import Event, ImportBatch, ImportBatchError, Invoice, PayerAlias, PaymentLine, PaymentMatch, ProcessedApprovalToken, PromiseToPay, RateLimitBucket, Retailer, ReversalNote, Session as SessionModel, Tenant, TenantImportMapping, User
+from app.matching.payer_memory import (
+    create_payer_alias,
+    delete_payer_alias,
+    evaluate_payer_memory_proposal,
+    list_payer_aliases,
+)
 from app.channels.telegram.i18n import t
 from app.kernel.money import format_money, to_etb
 from app.matching.context import compute_match_reconciliation_context
@@ -1395,6 +1401,17 @@ async def upload_statement(
         if getattr(pl, "is_previously_reversed", False) and res.status == "auto_confirmed":
             res.status = "proposed"
             res.reason += " (demoted to review queue: previously reversed payment)"
+        # Check payer memory for unmatched lines
+        if res.status == "unmatched":
+            payer_res = evaluate_payer_memory_proposal(
+                session,
+                tenant_id=tenant.id,
+                payment_line=pl,
+                open_invoices=open_invoices,
+                retailers=retailers,
+            )
+            if payer_res is not None:
+                res = payer_res
         matcher.apply_match_results(session, pl, res, actor_id=user.id)
         if res.status == "auto_confirmed":
             auto_count += 1
@@ -1687,6 +1704,17 @@ def confirm_statement_wizard(
         if getattr(pl, "is_previously_reversed", False) and res.status == "auto_confirmed":
             res.status = "proposed"
             res.reason += " (demoted to review queue: previously reversed payment)"
+        # Check payer memory for unmatched lines
+        if res.status == "unmatched":
+            payer_res = evaluate_payer_memory_proposal(
+                session,
+                tenant_id=tenant.id,
+                payment_line=pl,
+                open_invoices=open_invoices,
+                retailers=retailers,
+            )
+            if payer_res is not None:
+                res = payer_res
         matcher.apply_match_results(session, pl, res, actor_id=user.id)
         if res.status == "auto_confirmed":
             auto_count += 1
@@ -3486,3 +3514,116 @@ def export_voided_sales_endpoint(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# Payer Memory Routes (Owner Only)
+# ---------------------------------------------------------------------------
+
+@router.get("/payer-aliases", response_class=HTMLResponse)
+def get_payer_aliases_page(
+    request: Request,
+    msg: str = "",
+    session: Session = Depends(get_session),
+    session_info: tuple[Tenant, User, SessionModel] = Depends(get_current_session_info),
+):
+    """View and manage payer memory aliases for third-party payers."""
+    tenant, user, session_rec = session_info
+    if user.role != UserRole.OWNER.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Owner role required.")
+    set_tenant(session, tenant.id)
+    lang = request.cookies.get("lang", "en")
+    csrf_token = generate_csrf_token(session_rec.id, settings.secret_key)
+
+    aliases = list_payer_aliases(session, tenant_id=tenant.id)
+    retailers = session.execute(
+        select(Retailer).where(Retailer.tenant_id == tenant.id).order_by(Retailer.name.asc())
+    ).scalars().all()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="payer_aliases.html",
+        context={
+            "lang": lang,
+            "tenant_name": tenant.name,
+            "user_role": user.role,
+            "csrf_token": csrf_token,
+            "msg": msg,
+            "aliases": aliases,
+            "retailers": retailers,
+        },
+    )
+
+
+@router.post("/payer-aliases")
+def post_create_payer_alias_endpoint(
+    retailer_id: str = Form(...),
+    raw_payer_name: str | None = Form(None),
+    raw_payer_ref: str | None = Form(None),
+    payment_id: str | None = Form(None),
+    session: Session = Depends(get_session),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+    _csrf: None = Depends(verify_csrf),
+):
+    """
+    Owner-only endpoint to associate a third-party payer with a credit retailer.
+    Never created automatically.
+    """
+    tenant, user = owner_context
+    set_tenant(session, tenant.id)
+
+    try:
+        ret_uuid = uuid.UUID(retailer_id.strip())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid retailer ID")
+
+    retailer = session.execute(
+        select(Retailer).where(Retailer.tenant_id == tenant.id, Retailer.id == ret_uuid)
+    ).scalar_one_or_none()
+    if not retailer:
+        raise HTTPException(status_code=404, detail="Retailer not found")
+
+    clean_name = raw_payer_name.strip() if raw_payer_name else None
+    clean_ref = raw_payer_ref.strip() if raw_payer_ref else None
+    if not clean_name and not clean_ref:
+        raise HTTPException(status_code=400, detail="At least one of payer name or phone/reference is required.")
+
+    create_payer_alias(
+        session,
+        tenant_id=tenant.id,
+        retailer_id=ret_uuid,
+        raw_payer_name=clean_name,
+        raw_payer_ref=clean_ref,
+        user_id=user.id,
+    )
+    session.commit()
+
+    if payment_id:
+        redirect_url = f"/?msg=Payer+alias+linked+to+{quote(retailer.name)}"
+    else:
+        redirect_url = "/payer-aliases?msg=Payer+alias+saved+successfully"
+    return RedirectResponse(redirect_url, status_code=303)
+
+
+@router.post("/payer-aliases/{alias_id}/delete")
+def post_delete_payer_alias_endpoint(
+    alias_id: str,
+    session: Session = Depends(get_session),
+    owner_context: tuple[Tenant, User] = Depends(require_owner),
+    _csrf: None = Depends(verify_csrf),
+):
+    """Owner-only endpoint to soft-delete a payer alias."""
+    tenant, user = owner_context
+    set_tenant(session, tenant.id)
+
+    try:
+        al_uuid = uuid.UUID(alias_id.strip())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid alias ID")
+
+    deleted = delete_payer_alias(session, tenant_id=tenant.id, alias_id=al_uuid, user_id=user.id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Payer alias not found or already deleted")
+    session.commit()
+
+    return RedirectResponse("/payer-aliases?msg=Payer+alias+deleted+successfully", status_code=303)

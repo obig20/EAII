@@ -440,6 +440,34 @@ class TestRlsTenantIsolation:
         ).fetchall()
         assert len(result) == 0, f"RLS VIOLATION: Tenant B can see Tenant A's pilot_snapshot {snapshot.id}"
 
+    def test_payer_aliases_isolation(self, db_session, tenant_a, tenant_b, owner_user_a):
+        """Tenant B session cannot see Tenant A payer_aliases."""
+        from app.kernel.models import PayerAlias, Retailer
+
+        retailer_a = Retailer(id=uuid.uuid4(), tenant_id=tenant_a.id, name="Alias Retailer", created_at=_now())
+        db_session.add(retailer_a)
+        db_session.flush()
+
+        alias = PayerAlias(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            retailer_id=retailer_a.id,
+            raw_payer_name="RLS Payer",
+            normalized_payer_name="rls payer",
+            created_by=owner_user_a.id,
+            created_at=_now(),
+        )
+        db_session.add(alias)
+        db_session.flush()
+
+        _set_tenant(db_session, tenant_b.id)
+
+        result = db_session.execute(
+            text("SELECT id FROM payer_aliases WHERE id = :aid"),
+            {"aid": str(alias.id)},
+        ).fetchall()
+        assert len(result) == 0, f"RLS VIOLATION: Tenant B can see Tenant A's payer_alias {alias.id}"
+
 
 # ---------------------------------------------------------------------------
 # Test that RLS is FORCED (even for the table owner if they are the app role)
