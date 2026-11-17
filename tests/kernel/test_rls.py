@@ -273,6 +273,173 @@ class TestRlsTenantIsolation:
             f"RLS VIOLATION: Tenant B query returned {count} rows from Tenant A's invoices"
         )
 
+    def test_invoice_void_notes_isolation(self, db_session, tenant_a, tenant_b, owner_user_a):
+        """Tenant B session cannot see Tenant A invoice_void_notes."""
+        from app.kernel.models import Invoice, InvoiceVoidNote, Retailer
+
+        retailer_a = Retailer(id=uuid.uuid4(), tenant_id=tenant_a.id, name="Void Retailer", created_at=_now())
+        db_session.add(retailer_a)
+        db_session.flush()
+
+        inv = Invoice(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            invoice_number="INV-VOID-RLS",
+            retailer_id=retailer_a.id,
+            amount_santim=10000,
+            issued_date=_today(),
+            due_date=_today(),
+            state="void",
+            created_at=_now(),
+            created_by=owner_user_a.id,
+        )
+        db_session.add(inv)
+        db_session.flush()
+
+        note = InvoiceVoidNote(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            invoice_id=inv.id,
+            reason_code="CUSTOMER_CANCELED",
+            notes="Void note RLS test",
+            created_by=owner_user_a.id,
+            created_at=_now(),
+        )
+        db_session.add(note)
+        db_session.flush()
+
+        _set_tenant(db_session, tenant_b.id)
+
+        result = db_session.execute(
+            text("SELECT id FROM invoice_void_notes WHERE id = :nid"),
+            {"nid": str(note.id)},
+        ).fetchall()
+        assert len(result) == 0, f"RLS VIOLATION: Tenant B can see Tenant A's invoice_void_note {note.id}"
+
+    def test_tenant_import_mappings_isolation(self, db_session, tenant_a, tenant_b, owner_user_a):
+        """Tenant B session cannot see Tenant A tenant_import_mappings."""
+        from app.kernel.models import TenantImportMapping
+
+        mapping = TenantImportMapping(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            source_name="Custom Format",
+            delimiter=",",
+            encoding="utf-8",
+            header_row_index=0,
+            date_column="Date",
+            date_format="%Y-%m-%d",
+            amount_column="Amount",
+            created_by=owner_user_a.id,
+            created_at=_now(),
+            updated_at=_now(),
+        )
+        db_session.add(mapping)
+        db_session.flush()
+
+        _set_tenant(db_session, tenant_b.id)
+
+        result = db_session.execute(
+            text("SELECT id FROM tenant_import_mappings WHERE id = :mid"),
+            {"mid": str(mapping.id)},
+        ).fetchall()
+        assert len(result) == 0, f"RLS VIOLATION: Tenant B can see Tenant A's import mapping {mapping.id}"
+
+    def test_import_batch_errors_isolation(self, db_session, tenant_a, tenant_b, owner_user_a):
+        """Tenant B session cannot see Tenant A import_batch_errors."""
+        from app.kernel.models import ImportBatch, ImportBatchError
+
+        batch = ImportBatch(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            source_type="cbe_csv",
+            evidence_level="L2",
+            filename="test.csv",
+            imported_by=owner_user_a.id,
+            imported_at=_now(),
+            file_hash="rlstestbatchhash",
+        )
+        db_session.add(batch)
+        db_session.flush()
+
+        err = ImportBatchError(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            import_batch_id=batch.id,
+            row_index=1,
+            raw_data="raw,error,line",
+            error_reason="Parse error test",
+            created_at=_now(),
+        )
+        db_session.add(err)
+        db_session.flush()
+
+        _set_tenant(db_session, tenant_b.id)
+
+        result = db_session.execute(
+            text("SELECT id FROM import_batch_errors WHERE id = :eid"),
+            {"eid": str(err.id)},
+        ).fetchall()
+        assert len(result) == 0, f"RLS VIOLATION: Tenant B can see Tenant A's import batch error {err.id}"
+
+    def test_promises_to_pay_isolation(self, db_session, tenant_a, tenant_b, owner_user_a):
+        """Tenant B session cannot see Tenant A promises_to_pay."""
+        from app.kernel.models import PromiseToPay, Retailer
+
+        retailer_a = Retailer(id=uuid.uuid4(), tenant_id=tenant_a.id, name="Promise Retailer", created_at=_now())
+        db_session.add(retailer_a)
+        db_session.flush()
+
+        promise = PromiseToPay(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            retailer_id=retailer_a.id,
+            amount_santim=150000,
+            promised_date=_today(),
+            status="pending",
+            notes="Promise RLS test",
+            created_by=owner_user_a.id,
+            created_at=_now(),
+        )
+        db_session.add(promise)
+        db_session.flush()
+
+        _set_tenant(db_session, tenant_b.id)
+
+        result = db_session.execute(
+            text("SELECT id FROM promises_to_pay WHERE id = :pid"),
+            {"pid": str(promise.id)},
+        ).fetchall()
+        assert len(result) == 0, f"RLS VIOLATION: Tenant B can see Tenant A's promise_to_pay {promise.id}"
+
+    def test_pilot_snapshots_isolation(self, db_session, tenant_a, tenant_b, owner_user_a):
+        """Tenant B session cannot see Tenant A pilot_snapshots."""
+        from app.kernel.models import PilotSnapshot
+
+        snapshot = PilotSnapshot(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            snapshot_date=_today(),
+            snapshot_type="baseline",
+            total_credit_sales_santim=500000,
+            total_overdue_santim=120000,
+            invoice_count=10,
+            retailer_count=4,
+            metrics_payload={"synthetic": True},
+            created_at=_now(),
+            created_by=owner_user_a.id,
+        )
+        db_session.add(snapshot)
+        db_session.flush()
+
+        _set_tenant(db_session, tenant_b.id)
+
+        result = db_session.execute(
+            text("SELECT id FROM pilot_snapshots WHERE id = :sid"),
+            {"sid": str(snapshot.id)},
+        ).fetchall()
+        assert len(result) == 0, f"RLS VIOLATION: Tenant B can see Tenant A's pilot_snapshot {snapshot.id}"
+
 
 # ---------------------------------------------------------------------------
 # Test that RLS is FORCED (even for the table owner if they are the app role)

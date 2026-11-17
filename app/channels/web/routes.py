@@ -3213,16 +3213,27 @@ def view_balance_confirmation(
     except TokenError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    # Log viewed event with zero personal data (Stage 5 pilot metrics requirement)
-    append_event(
-        session,
-        tenant_id=token_rec.tenant_id,
-        event_type="retailer_token.viewed",
-        aggregate_type="retailer_confirmation_token",
-        aggregate_id=token_rec.id,
-        payload={"token_id": str(token_rec.id)},
+    # Log viewed event once per token with zero personal data (idempotent, prevents log flooding)
+    existing_view = (
+        session.query(Event.id)
+        .filter(
+            Event.tenant_id == token_rec.tenant_id,
+            Event.aggregate_type == "retailer_confirmation_token",
+            Event.aggregate_id == token_rec.id,
+            Event.event_type == "retailer_token.viewed",
+        )
+        .first()
     )
-    session.commit()
+    if not existing_view:
+        append_event(
+            session,
+            tenant_id=token_rec.tenant_id,
+            event_type="retailer_token.viewed",
+            aggregate_type="retailer_confirmation_token",
+            aggregate_id=token_rec.id,
+            payload={"token_id": str(token_rec.id)},
+        )
+        session.commit()
 
     tenant = session.get(Tenant, token_rec.tenant_id)
     total_santim = sum(inv.amount_santim for inv in invoices)

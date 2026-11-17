@@ -223,6 +223,63 @@ class TestCashierRoleRestrictions:
         resp = client.post(f"/settings/users/{dummy_id}/deactivate")
         assert resp.status_code == 403, "Cashier should not deactivate users"
 
+        # 12. Stage 1: Void invoice
+        resp = client.post(f"/invoices/{dummy_id}/void", data={"reason_code": "CUSTOMER_CANCELED"})
+        assert resp.status_code == 403, "Cashier should not void invoices"
+
+        # 13. Stage 2: Rematch match
+        resp = client.post(f"/matches/{dummy_id}/rematch", data={"target_invoice_id": str(dummy_id)})
+        assert resp.status_code == 403, "Cashier should not rematch matches"
+
+        # 14. Stage 2: Rematch payment
+        resp = client.post(f"/payments/{dummy_id}/rematch", data={"target_invoice_id": str(dummy_id)})
+        assert resp.status_code == 403, "Cashier should not rematch payments"
+
+        # 15. Stage 3: Statement wizard upload
+        resp = client.post("/statements/wizard/upload", files={"file": ("test.csv", b"dummy,csv", "text/csv")})
+        assert resp.status_code == 403, "Cashier should not upload statement via wizard"
+
+        # 16. Stage 3: Statement wizard preview
+        resp = client.post(
+            "/statements/wizard/preview",
+            data={
+                "cache_token": "fake",
+                "filename": "f.csv",
+                "date_column": "Date",
+                "date_format": "%Y-%m-%d",
+                "amount_column": "Amt",
+            },
+        )
+        assert resp.status_code == 403, "Cashier should not preview statement wizard"
+
+        # 17. Stage 3: Statement wizard confirm
+        resp = client.post(
+            "/statements/wizard/confirm",
+            data={
+                "cache_token": "fake",
+                "filename": "f.csv",
+                "date_column": "Date",
+                "date_format": "%Y-%m-%d",
+                "amount_column": "Amt",
+            },
+        )
+        assert resp.status_code == 403, "Cashier should not confirm statement wizard"
+
+        # 18. Stage 4: Reminder log
+        resp = client.post(f"/reminders/{dummy_id}/log", data={"channel": "sms"})
+        assert resp.status_code == 403, "Cashier should not log reminders"
+
+        # 19. Stage 4: Reminder promise
+        resp = client.post(
+            f"/reminders/{dummy_id}/promise",
+            data={"amount_etb": "100.00", "promised_date": "2026-12-01"},
+        )
+        assert resp.status_code == 403, "Cashier should not record promises"
+
+        # 20. Stage 4: Cancel promise
+        resp = client.post(f"/promises/{dummy_id}/cancel")
+        assert resp.status_code == 403, "Cashier should not cancel promises"
+
     @pytest.mark.asyncio
     async def test_telegram_cashier_blocked_from_owner_actions(
         self,
@@ -364,6 +421,60 @@ class TestCsrfProtection:
         # Now CSRF passes (route proceeds to parameter validation / logic)
         resp = client.post("/sales", data={})
         assert resp.status_code != 403
+
+    def test_all_stages_1_to_5_post_routes_require_csrf(
+        self,
+        client: TestClient,
+        db_session: Session,
+        tenant_a: Tenant,
+        owner_user_a: User,
+    ):
+        """All POST routes added across Stages 1-5 must return HTTP 403 when CSRF is missing."""
+        session_rec, raw_token = create_user_session(db_session, user=owner_user_a)
+        db_session.commit()
+
+        client.cookies.set(SESSION_COOKIE_NAME, raw_token)
+        client.headers.pop("x-csrf-token", None)
+        dummy_id = uuid.uuid4()
+
+        stage_post_endpoints = [
+            (f"/invoices/{dummy_id}/void", {"data": {"reason_code": "CUSTOMER_CANCELED"}}),
+            (f"/matches/{dummy_id}/rematch", {"data": {"target_invoice_id": str(dummy_id)}}),
+            (f"/payments/{dummy_id}/rematch", {"data": {"target_invoice_id": str(dummy_id)}}),
+            ("/statements/wizard/upload", {"files": {"file": ("test.csv", b"dummy,csv", "text/csv")}}),
+            (
+                "/statements/wizard/preview",
+                {
+                    "data": {
+                        "cache_token": "fake",
+                        "filename": "f.csv",
+                        "date_column": "Date",
+                        "date_format": "%Y-%m-%d",
+                        "amount_column": "Amt",
+                    }
+                },
+            ),
+            (
+                "/statements/wizard/confirm",
+                {
+                    "data": {
+                        "cache_token": "fake",
+                        "filename": "f.csv",
+                        "date_column": "Date",
+                        "date_format": "%Y-%m-%d",
+                        "amount_column": "Amt",
+                    }
+                },
+            ),
+            (f"/reminders/{dummy_id}/log", {"data": {"channel": "sms"}}),
+            (f"/reminders/{dummy_id}/promise", {"data": {"amount_etb": "100.00", "promised_date": "2026-12-01"}}),
+            (f"/promises/{dummy_id}/cancel", {"data": {}}),
+        ]
+
+        for path, kwargs in stage_post_endpoints:
+            resp = client.post(path, **kwargs)
+            assert resp.status_code == 403, f"Route {path} did not reject missing CSRF token (got {resp.status_code})"
+            assert "Invalid or missing CSRF token" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------

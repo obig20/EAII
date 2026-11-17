@@ -58,7 +58,7 @@ backups/
 
 # Generated reports & outputs
 report.html
-reports/
+/reports/
 *_report.html
 
 # Real / Sensitive Data folders

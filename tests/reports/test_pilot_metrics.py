@@ -53,7 +53,7 @@ def _dt(d: date, hour: int = 10) -> datetime:
 def test_pilot_baseline_capture_and_db(db_session: Session, tenant_a: Tenant, owner_user_a: User):
     """Test capturing baseline snapshot and DB storage under forced RLS."""
     set_tenant(db_session, tenant_a.id)
-    today = date(2026, 11, 1)
+    today = datetime.now(timezone.utc).date()
 
     # Create synthetic retailer & invoices
     retailer = Retailer(
@@ -607,24 +607,31 @@ def test_retailer_link_viewed_event(client, db_session: Session, tenant_a: Tenan
     )
     db_session.commit()
 
-    # Retailer visits the link
+    # Retailer visits the link multiple times (must be idempotent, no log flood)
     resp = client.get(f"/confirm-balance/{raw_token}")
     assert resp.status_code == 200
+    resp2 = client.get(f"/confirm-balance/{raw_token}")
+    assert resp2.status_code == 200
+    resp3 = client.get(f"/confirm-balance/{raw_token}")
+    assert resp3.status_code == 200
 
-    # Query event
-    view_evt = db_session.execute(
+    # Query events
+    view_evts = db_session.execute(
         select(Event).where(
             Event.tenant_id == tenant_a.id,
             Event.event_type == "retailer_token.viewed",
             Event.aggregate_id == token_rec.id,
         )
-    ).scalars().first()
+    ).scalars().all()
 
-    assert view_evt is not None
+    # Must be exactly 1 event (idempotent)
+    assert len(view_evts) == 1
+    view_evt = view_evts[0]
     # Payload must have token_id only, zero personal data (no phone, no IP, no names)
     assert view_evt.payload == {"token_id": str(token_rec.id)}
     assert "phone" not in view_evt.payload
     assert "name" not in view_evt.payload
+    assert "ip" not in view_evt.payload
 
 
 def test_pilot_cli_commands(tmp_path: Path, monkeypatch, db_session: Session, tenant_a: Tenant):
