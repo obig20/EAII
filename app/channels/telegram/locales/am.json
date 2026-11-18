@@ -112,5 +112,6 @@
   "payer_memory_title": "የከፋይ ማስታወሻ <!-- needs native review -->",
   "payer_memory_link_payer": "ከፋይ አገናኝ <!-- needs native review -->",
   "payer_memory_known_payer": "የታወቀ ከፋይ፣ በ {date} አረጋግጠዋል <!-- needs native review -->",
-  "payer_memory_belongs_to": "ይህ ከፋይ የዚህ ነጋዴ ነው <!-- needs native review -->"
+  "payer_memory_belongs_to": "ይህ ከፋይ የዚህ ነጋዴ ነው <!-- needs native review -->",
+  "remittance_invoice_note": "እባክዎ በዝውውር ማስታወሻዎ ላይ የደረሰኝ ቁጥሩን ይፃፉ <!-- needs native review -->"
 }

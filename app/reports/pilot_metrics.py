@@ -30,6 +30,7 @@ from app.kernel.events import append_event
 from app.kernel.models import (
     Event,
     Invoice,
+    PayerAlias,
     PaymentLine,
     PaymentMatch,
     PilotSnapshot,
@@ -40,6 +41,17 @@ from app.kernel.models import (
 from app.kernel.money import format_money, to_etb
 from app.kernel.sales import detect_sequence_gaps
 from app.kernel.tenant import set_tenant
+from app.matching.normalization import (
+    normalize_account_number,
+    normalize_ethiopian_name,
+    normalize_phone,
+    string_similarity,
+)
+from app.matching.payer_memory import (
+    find_matching_payer_aliases,
+    normalize_payer_name,
+    normalize_payer_reference,
+)
 
 
 def capture_pilot_baseline(
@@ -334,11 +346,193 @@ def compute_pilot_metrics(
     total_calendar_days = max(1, (to_date - from_date).days + 1)
     active_days_pct = round((active_days_count / total_calendar_days) * 100.0, 1)
 
+    # 9. Real Problem Measurement: Identification Quality & Friction
+    credits_stmt = select(PaymentLine).where(
+        PaymentLine.tenant_id == tenant_id,
+        PaymentLine.value_date >= from_date,
+        PaymentLine.value_date <= to_date,
+    )
+    statement_credits = session.execute(credits_stmt).scalars().all()
+    credit_sample_size = len(statement_credits)
+
+    # Active / open invoices in tenant
+    open_inv_stmt = select(Invoice).where(
+        Invoice.tenant_id == tenant_id,
+        Invoice.state.in_([InvoiceState.OPEN.value, InvoiceState.PARTIALLY_PAID.value]),
+    )
+    open_invoices = session.execute(open_inv_stmt).scalars().all()
+    open_inv_numbers = {
+        inv.invoice_number.strip().upper()
+        for inv in open_invoices
+        if inv.invoice_number and inv.invoice_number.strip()
+    }
+
+    # Retailers for tenant
+    ret_stmt = select(Retailer).where(Retailer.tenant_id == tenant_id)
+    retailers = session.execute(ret_stmt).scalars().all()
+
+    # Active payer aliases
+    alias_stmt = select(PayerAlias).where(
+        PayerAlias.tenant_id == tenant_id,
+        PayerAlias.deleted_at.is_(None),
+    )
+    active_aliases = session.execute(alias_stmt).scalars().all()
+
+    if credit_sample_size > 0:
+        ref_match_count = 0
+        retailer_match_count = 0
+        known_payer_count = 0
+        no_identifier_count = 0
+
+        for pl in statement_credits:
+            # 1. Invoice in reference
+            has_ref = False
+            ref_combined = f"{pl.raw_reference or ''} {pl.source_ref or ''}".upper()
+            for inv_no in open_inv_numbers:
+                if inv_no in ref_combined:
+                    has_ref = True
+                    break
+
+            # 2. Payer name or phone matches retailer
+            has_ret = False
+            cp_phone = normalize_phone(pl.counterparty_account or pl.raw_reference)
+            cp_name = normalize_ethiopian_name(pl.counterparty_name) if pl.counterparty_name else None
+            for r in retailers:
+                if cp_phone and r.phone:
+                    r_phone = normalize_phone(r.phone)
+                    if r_phone and cp_phone == r_phone:
+                        has_ret = True
+                        break
+                if cp_name and r.name:
+                    r_name = normalize_ethiopian_name(r.name)
+                    if cp_name == r_name or string_similarity(cp_name, r_name) >= 0.85:
+                        has_ret = True
+                        break
+
+            # 3. Known payer alias match
+            has_alias = False
+            if active_aliases:
+                line_ref = normalize_payer_reference(pl.counterparty_account or pl.raw_reference)
+                line_name = normalize_payer_name(pl.counterparty_name)
+                for al in active_aliases:
+                    if al.normalized_payer_ref and line_ref and al.normalized_payer_ref == line_ref:
+                        has_alias = True
+                        break
+                    if al.normalized_payer_name and line_name:
+                        if al.normalized_payer_name == line_name or string_similarity(al.normalized_payer_name, line_name) >= 0.85:
+                            has_alias = True
+                            break
+
+            # 4. No usable identifier
+            has_no_id = (not has_ref) and (not has_ret) and (not has_alias)
+
+            if has_ref:
+                ref_match_count += 1
+            if has_ret:
+                retailer_match_count += 1
+            if has_alias:
+                known_payer_count += 1
+            if has_no_id:
+                no_identifier_count += 1
+
+        share_ref_pct = round((ref_match_count / credit_sample_size) * 100.0, 1)
+        share_ret_pct = round((retailer_match_count / credit_sample_size) * 100.0, 1)
+        share_known_pct = round((known_payer_count / credit_sample_size) * 100.0, 1)
+        share_no_id_pct = round((no_identifier_count / credit_sample_size) * 100.0, 1)
+    else:
+        ref_match_count = 0
+        retailer_match_count = 0
+        known_payer_count = 0
+        no_identifier_count = 0
+        share_ref_pct = None
+        share_ret_pct = None
+        share_known_pct = None
+        share_no_id_pct = None
+
+    # 5. Median minutes the owner spends in the review queue per day
+    review_events_stmt = select(Event).where(
+        Event.tenant_id == tenant_id,
+        Event.event_type.in_([
+            "match.web_confirmed",
+            "match.web_rejected",
+            "match.confirmed",
+            "match.rejected",
+            "match.reversed",
+            "payer_alias.created",
+        ]),
+        Event.created_at >= from_dt,
+        Event.created_at <= to_dt,
+    ).order_by(Event.created_at)
+    review_events = session.execute(review_events_stmt).scalars().all()
+
+    daily_events: dict[date, list[datetime]] = {}
+    for ev in review_events:
+        d = ev.created_at.astimezone(timezone.utc).date()
+        daily_events.setdefault(d, []).append(ev.created_at.astimezone(timezone.utc))
+
+    daily_minutes_list: list[float] = []
+    for d, timestamps in daily_events.items():
+        sorted_ts = sorted(timestamps)
+        day_seconds = 0.0
+        prev_ts = sorted_ts[0]
+        for ts in sorted_ts[1:]:
+            gap = (ts - prev_ts).total_seconds()
+            if gap <= 900:  # <= 15m active review clustering
+                day_seconds += gap
+            else:
+                day_seconds += 60.0
+            prev_ts = ts
+        day_seconds += 60.0
+        daily_minutes_list.append(round(day_seconds / 60.0, 1))
+
+    if daily_minutes_list:
+        median_daily_review_minutes = round(statistics.median(daily_minutes_list), 1)
+        review_days_sample_size = len(daily_minutes_list)
+        review_daily_minutes_str = f"{median_daily_review_minutes:.1f} minutes"
+    else:
+        median_daily_review_minutes = None
+        review_days_sample_size = 0
+        review_daily_minutes_str = None
+
     return {
         "tenant_id": str(tenant_id),
         "from_date": from_date.isoformat(),
         "to_date": to_date.isoformat(),
         "metrics": {
+            "ref_invoice_match_share": {
+                "name": "Reference Contains Open Invoice Number Share",
+                "value": f"{share_ref_pct}%" if share_ref_pct is not None else "not available",
+                "sample_size": credit_sample_size,
+                "raw_pct": share_ref_pct,
+                "count": ref_match_count,
+            },
+            "retailer_counterparty_share": {
+                "name": "Payer Name / Phone Matches Retailer Share",
+                "value": f"{share_ret_pct}%" if share_ret_pct is not None else "not available",
+                "sample_size": credit_sample_size,
+                "raw_pct": share_ret_pct,
+                "count": retailer_match_count,
+            },
+            "known_payer_share": {
+                "name": "Matched Through Known Payer Share",
+                "value": f"{share_known_pct}%" if share_known_pct is not None else "not available",
+                "sample_size": credit_sample_size,
+                "raw_pct": share_known_pct,
+                "count": known_payer_count,
+            },
+            "no_usable_identifier_share": {
+                "name": "Payments with No Usable Identifier Share",
+                "value": f"{share_no_id_pct}%" if share_no_id_pct is not None else "not available",
+                "sample_size": credit_sample_size,
+                "raw_pct": share_no_id_pct,
+                "count": no_identifier_count,
+            },
+            "review_queue_daily_minutes": {
+                "name": "Median Minutes Owner Spends in Review Queue per Day",
+                "value": review_daily_minutes_str if review_daily_minutes_str is not None else "not available",
+                "sample_size": review_days_sample_size,
+                "raw_minutes": median_daily_review_minutes,
+            },
             "log_velocity": {
                 "name": "Log Velocity (within 24 hours)",
                 "value": f"{log_velocity_pct}%" if log_velocity_pct is not None else "not available",
@@ -414,6 +608,21 @@ def generate_pilot_metrics_html(
     from_date = report_data["from_date"]
     to_date = report_data["to_date"]
     gen_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    # Safe defaults for problem measurement metrics
+    _def_m = {
+        "name": "",
+        "value": "not available",
+        "sample_size": 0,
+        "count": 0,
+        "raw_pct": None,
+        "raw_minutes": None,
+    }
+    m_ref_inv = m.get("ref_invoice_match_share", _def_m)
+    m_ret_part = m.get("retailer_counterparty_share", _def_m)
+    m_known_p = m.get("known_payer_share", _def_m)
+    m_no_id = m.get("no_usable_identifier_share", _def_m)
+    m_rev_min = m.get("review_queue_daily_minutes", _def_m)
 
     # Format helpers
     def _val(item: dict[str, Any]) -> str:
@@ -746,6 +955,74 @@ def generate_pilot_metrics_html(
         </div>
         <div class="card-detail">
           Calendar days with cashier or owner events recorded in window.
+        </div>
+      </div>
+
+      <!-- 9. Collections Friction & Problem Measurement -->
+      <div class="card" style="grid-column: 1 / -1; border-color: rgba(56, 189, 248, 0.4);">
+        <div style="margin-bottom: 0.75rem;">
+          <h2 style="font-size: 1.1rem; font-weight: 700; color: var(--accent); margin-bottom: 0.25rem;">
+            Real Problem Measurement: Collections Friction & Remittance Quality
+          </h2>
+          <p style="font-size: 0.85rem; color: var(--text-muted);">
+            Aggregates quantifying remittance identifier accuracy and manual queue overhead.
+          </p>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-top: 0.5rem;">
+          <div style="background: rgba(15, 23, 42, 0.6); padding: 1rem; border-radius: 8px; border: 1px solid var(--card-border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-size: 0.8rem; color: var(--text-muted);">Invoice # in Transfer Note</span>
+              {_badge(m_ref_inv["sample_size"])}
+            </div>
+            <div class="metric-value {'na' if m_ref_inv['value'] == 'not available' else ''}" style="font-size: 1.35rem;">
+              {_val(m_ref_inv)}
+            </div>
+            <div class="card-detail">{m_ref_inv["count"]} statement credits</div>
+          </div>
+
+          <div style="background: rgba(15, 23, 42, 0.6); padding: 1rem; border-radius: 8px; border: 1px solid var(--card-border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-size: 0.8rem; color: var(--text-muted);">Retailer Name / Phone Match</span>
+              {_badge(m_ret_part["sample_size"])}
+            </div>
+            <div class="metric-value {'na' if m_ret_part['value'] == 'not available' else ''}" style="font-size: 1.35rem;">
+              {_val(m_ret_part)}
+            </div>
+            <div class="card-detail">{m_ret_part["count"]} statement credits</div>
+          </div>
+
+          <div style="background: rgba(15, 23, 42, 0.6); padding: 1rem; border-radius: 8px; border: 1px solid var(--card-border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-size: 0.8rem; color: var(--text-muted);">Known Payer Memory Match</span>
+              {_badge(m_known_p["sample_size"])}
+            </div>
+            <div class="metric-value {'na' if m_known_p['value'] == 'not available' else ''}" style="font-size: 1.35rem;">
+              {_val(m_known_p)}
+            </div>
+            <div class="card-detail">{m_known_p["count"]} statement credits</div>
+          </div>
+
+          <div style="background: rgba(15, 23, 42, 0.6); padding: 1rem; border-radius: 8px; border: 1px solid var(--card-border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-size: 0.8rem; color: var(--danger);">No Usable Identifier</span>
+              {_badge(m_no_id["sample_size"])}
+            </div>
+            <div class="metric-value {'na' if m_no_id['value'] == 'not available' else ''}" style="font-size: 1.35rem; color: var(--danger);">
+              {_val(m_no_id)}
+            </div>
+            <div class="card-detail">{m_no_id["count"]} payments unlinked</div>
+          </div>
+
+          <div style="background: rgba(15, 23, 42, 0.6); padding: 1rem; border-radius: 8px; border: 1px solid var(--card-border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-size: 0.8rem; color: var(--text-muted);">Daily Owner Review Time</span>
+              {_badge(m_rev_min["sample_size"])}
+            </div>
+            <div class="metric-value {'na' if m_rev_min['value'] == 'not available' else ''}" style="font-size: 1.35rem;">
+              {_val(m_rev_min)}
+            </div>
+            <div class="card-detail">Median minutes/day</div>
+          </div>
         </div>
       </div>
     </div>

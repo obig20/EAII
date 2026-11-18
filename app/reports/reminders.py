@@ -41,13 +41,13 @@ def generate_reminder_text(
         return (
             f"ክቡር {retailer_name}፣ ይህ ከ{tenant_name} የተላከ ወዳጃዊ ማስታወሻ ነው። "
             f"ጠቅላላ ETB {etb_formatted} የሆኑ {count} ያልተከፈሉ ደረሰኞች አሉዎት። "
-            f"የቀደመው መክፈያ ቀን {due_str} ነው። ለትብብርዎ እናመሰግናለን። <!-- needs native review -->"
+            f"የቀደመው መክፈያ ቀን {due_str} ነው። እባክዎ በዝውውር ማስታወሻዎ ላይ የደረሰኝ ቁጥሩን ይፃፉ <!-- needs native review -->። ለትብብርዎ እናመሰግናለን። <!-- needs native review -->"
         )
 
     return (
         f"Dear {retailer_name}, this is a gentle reminder from {tenant_name}. "
         f"You have {count} outstanding invoice(s) totaling ETB {etb_formatted}, "
-        f"with the earliest due on {due_str}. Thank you for your continued partnership."
+        f"with the earliest due on {due_str}. Please write the invoice number in your transfer note. Thank you for your continued partnership."
     )
 
 

@@ -83,6 +83,17 @@ I18N = {
         "footer_confidential": "Birana Technology · Daily Close · All rights reserved · Addis Ababa, Ethiopia",
         "days_unit": "days",
         "days_na": "N/A",
+        "problem_title": "5. Remittance Quality & Collections Friction",
+        "problem_subtitle": "Empirical breakdown of identifier coverage and manual review burden across statement credits.",
+        "col_metric": "Problem Indicator",
+        "col_sample_size": "Sample Size",
+        "col_share": "Share / Value",
+        "col_impact": "Operational Impact",
+        "pm_ref_inv": "Transfer note contains open invoice number",
+        "pm_ret_party": "Payer name or phone matches customer",
+        "pm_known_payer": "Matched through known payer memory",
+        "pm_no_id": "Payments with no usable identifier",
+        "pm_review_time": "Median owner review queue time per day",
     },
     "am": {
         "confidential": "ሚስጥራዊ",
@@ -149,6 +160,17 @@ I18N = {
         "footer_confidential": "ቢራና ቴክኖሎጂ · ዕለታዊ ሂሳብ ማጠቃለያ · መብቱ በሕግ የተጠበቀ · አዲስ አበባ፣ ኢትዮጵያ",
         "days_unit": "ቀናት",
         "days_na": "አልተገኘም",
+        "problem_title": "5. የክፍያ መለያዎች ጥራት እና የችግሩ ስፋት <!-- needs native review -->",
+        "problem_subtitle": "የደንበኞች የክፍያ ማስታወሻ ጥራት እና በግምገማ ላይ የሚጠፋው ጊዜ መለኪያ <!-- needs native review -->",
+        "col_metric": "የመለኪያ አይነት <!-- needs native review -->",
+        "col_sample_size": "የናሙና ብዛት <!-- needs native review -->",
+        "col_share": "ድርሻ / መጠን <!-- needs native review -->",
+        "col_impact": "ተፅዕኖ <!-- needs native review -->",
+        "pm_ref_inv": "የዝውውር ማስታወሻው የደረሰኝ ቁጥር የያዘ <!-- needs native review -->",
+        "pm_ret_party": "የከፋዩ ስም ወይም ስልክ ከደንበኛው ጋር የሚመሳሰል <!-- needs native review -->",
+        "pm_known_payer": "በታወቀ ከፋይ ማህደረ-መረጃ የተገኘ <!-- needs native review -->",
+        "pm_no_id": "ምንም አይነት መለያ የሌላቸው ክፍያዎች <!-- needs native review -->",
+        "pm_review_time": "ባለቤቱ በግምገማ የሚያሳልፈው ዕለታዊ ጊዜ <!-- needs native review -->",
     },
 }
 
@@ -573,6 +595,63 @@ def render_collections_health_check_html(
     if not unmatched_deposits:
         unmatched_rows = f'<tr><td colspan="6" class="text-center" style="padding: 16px; color: var(--text-muted);">{html.escape(tr["no_data"])}</td></tr>'
 
+    # Render Section 5: Real Problem Measurement Rows
+    pm = report_data.get("problem_measurement", {})
+    ref_item = pm.get("ref_invoice_match_share", {})
+    ret_item = pm.get("retailer_counterparty_share", {})
+    known_item = pm.get("known_payer_share", {})
+    no_id_item = pm.get("no_usable_identifier_share", {})
+    time_item = pm.get("review_queue_daily_minutes", {})
+
+    pm_indicators = [
+        (
+            tr["pm_ref_inv"],
+            ref_item.get("sample_size", 0),
+            ref_item.get("value", "not available"),
+            "Auto-confirm eligible (Tier A)",
+            "badge-success",
+        ),
+        (
+            tr["pm_ret_party"],
+            ret_item.get("sample_size", 0),
+            ret_item.get("value", "not available"),
+            "Owner review required (Tier B/C)",
+            "badge-warning",
+        ),
+        (
+            tr["pm_known_payer"],
+            known_item.get("sample_size", 0),
+            known_item.get("value", "not available"),
+            "Owner confirmed third-party payer memory",
+            "badge-neutral",
+        ),
+        (
+            tr["pm_no_id"],
+            no_id_item.get("sample_size", 0),
+            no_id_item.get("value", "not available"),
+            "Unidentified inflow; phone call inquiry needed",
+            "badge-danger",
+        ),
+        (
+            tr["pm_review_time"],
+            time_item.get("sample_size", 0),
+            time_item.get("value", "not available"),
+            "Median owner minutes spent in review queue per active day",
+            "badge-neutral",
+        ),
+    ]
+
+    pm_rows = ""
+    for label, n, val, impact, b_cls in pm_indicators:
+        pm_rows += f"""
+        <tr>
+          <td><strong>{html.escape(label)}</strong></td>
+          <td class="text-center"><span class="badge badge-neutral">N = {n}</span></td>
+          <td class="text-right"><strong>{html.escape(str(val))}</strong></td>
+          <td><span class="badge {b_cls}">{html.escape(impact)}</span></td>
+        </tr>
+        """
+
     # Format Meta
     source_files_str = ", ".join(meta.get("source_files", []))
     gen_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -814,6 +893,27 @@ def render_collections_health_check_html(
           </thead>
           <tbody>
             {unmatched_rows}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Section 5: Remittance Quality & Collections Friction -->
+    <section class="section">
+      <h2 class="section-title">{html.escape(tr["problem_title"])}</h2>
+      <p class="section-subtitle">{html.escape(tr["problem_subtitle"])}</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>{html.escape(tr["col_metric"])}</th>
+              <th class="text-center">{html.escape(tr["col_sample_size"])}</th>
+              <th class="text-right">{html.escape(tr["col_share"])}</th>
+              <th>{html.escape(tr["col_impact"])}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pm_rows}
           </tbody>
         </table>
       </div>

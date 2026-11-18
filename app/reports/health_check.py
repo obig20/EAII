@@ -60,6 +60,7 @@ from app.kernel.events import append_event
 from app.kernel.models import (
     ImportBatch,
     Invoice,
+    PayerAlias,
     PaymentLine,
     PaymentMatch,
     Retailer,
@@ -75,6 +76,17 @@ from app.kernel.sales import (
 )
 from app.kernel.tenant import set_tenant
 from app.matching.matcher import PaymentMatcher
+from app.matching.normalization import (
+    normalize_account_number,
+    normalize_ethiopian_name,
+    normalize_phone,
+    string_similarity,
+)
+from app.matching.payer_memory import (
+    find_matching_payer_aliases,
+    normalize_payer_name,
+    normalize_payer_reference,
+)
 from app.reports.aging import calculate_aging_bucket, generate_aging_report
 from app.reports.health_check_html import render_collections_health_check_html
 
@@ -723,6 +735,129 @@ def run_health_check(
                 "desc": "All analyzed invoices and bank statement records are reconciled with no critical discrepancies found.",
             })
 
+        # 8. Real Problem Measurement (Collections Friction & Identifier Quality)
+        credit_sample_size = len(imported_payment_lines)
+        open_inv_numbers = {
+            inv.invoice_number.strip().upper()
+            for inv in created_invoices
+            if inv.invoice_number and inv.invoice_number.strip()
+        }
+
+        # Query active payer aliases for this temp tenant
+        alias_stmt = select(PayerAlias).where(
+            PayerAlias.tenant_id == temp_tenant.id,
+            PayerAlias.deleted_at.is_(None),
+        )
+        active_aliases = session.execute(alias_stmt).scalars().all()
+
+        if credit_sample_size > 0:
+            ref_match_count = 0
+            retailer_match_count = 0
+            known_payer_count = 0
+            no_identifier_count = 0
+
+            for pl in imported_payment_lines:
+                # 1. Invoice in reference
+                has_ref = False
+                ref_comb = f"{pl.raw_reference or ''} {pl.source_ref or ''}".upper()
+                for inv_no in open_inv_numbers:
+                    if inv_no in ref_comb:
+                        has_ref = True
+                        break
+
+                # 2. Payer name or phone matches retailer
+                has_ret = False
+                cp_phone = normalize_phone(pl.counterparty_account or pl.raw_reference)
+                cp_name = normalize_ethiopian_name(pl.counterparty_name) if pl.counterparty_name else None
+                for r in retailers_list:
+                    if cp_phone and r.phone:
+                        r_phone = normalize_phone(r.phone)
+                        if r_phone and cp_phone == r_phone:
+                            has_ret = True
+                            break
+                    if cp_name and r.name:
+                        r_name = normalize_ethiopian_name(r.name)
+                        if cp_name == r_name or string_similarity(cp_name, r_name) >= 0.85:
+                            has_ret = True
+                            break
+
+                # 3. Known payer alias match
+                has_alias = False
+                if active_aliases:
+                    line_ref = normalize_payer_reference(pl.counterparty_account or pl.raw_reference)
+                    line_name = normalize_payer_name(pl.counterparty_name)
+                    for al in active_aliases:
+                        if al.normalized_payer_ref and line_ref and al.normalized_payer_ref == line_ref:
+                            has_alias = True
+                            break
+                        if al.normalized_payer_name and line_name:
+                            if al.normalized_payer_name == line_name or string_similarity(al.normalized_payer_name, line_name) >= 0.85:
+                                has_alias = True
+                                break
+
+                # 4. No usable identifier
+                has_no_id = (not has_ref) and (not has_ret) and (not has_alias)
+
+                if has_ref:
+                    ref_match_count += 1
+                if has_ret:
+                    retailer_match_count += 1
+                if has_alias:
+                    known_payer_count += 1
+                if has_no_id:
+                    no_identifier_count += 1
+
+            share_ref_pct = round((ref_match_count / credit_sample_size) * 100.0, 1)
+            share_ret_pct = round((retailer_match_count / credit_sample_size) * 100.0, 1)
+            share_known_pct = round((known_payer_count / credit_sample_size) * 100.0, 1)
+            share_no_id_pct = round((no_identifier_count / credit_sample_size) * 100.0, 1)
+        else:
+            ref_match_count = 0
+            retailer_match_count = 0
+            known_payer_count = 0
+            no_identifier_count = 0
+            share_ref_pct = None
+            share_ret_pct = None
+            share_known_pct = None
+            share_no_id_pct = None
+
+        problem_measurement = {
+            "ref_invoice_match_share": {
+                "name": "Reference Contains Open Invoice Number",
+                "value": f"{share_ref_pct}%" if share_ref_pct is not None else "not available",
+                "sample_size": credit_sample_size,
+                "raw_pct": share_ref_pct,
+                "count": ref_match_count,
+            },
+            "retailer_counterparty_share": {
+                "name": "Payer Name / Phone Matches Retailer",
+                "value": f"{share_ret_pct}%" if share_ret_pct is not None else "not available",
+                "sample_size": credit_sample_size,
+                "raw_pct": share_ret_pct,
+                "count": retailer_match_count,
+            },
+            "known_payer_share": {
+                "name": "Matched via Known Payer Memory",
+                "value": f"{share_known_pct}%" if share_known_pct is not None else "not available",
+                "sample_size": credit_sample_size,
+                "raw_pct": share_known_pct,
+                "count": known_payer_count,
+            },
+            "no_usable_identifier_share": {
+                "name": "Payments with No Usable Identifier",
+                "value": f"{share_no_id_pct}%" if share_no_id_pct is not None else "not available",
+                "sample_size": credit_sample_size,
+                "raw_pct": share_no_id_pct,
+                "count": no_identifier_count,
+            },
+            "review_queue_daily_minutes": {
+                "name": "Median Minutes Owner Spends in Review Queue per Day",
+                "value": "not available",
+                "sample_size": 0,
+                "raw_minutes": None,
+            },
+        }
+
         # Assemble full report data
         report_data = {
             "meta": {
@@ -750,6 +885,7 @@ def run_health_check(
                 "unidentified_deposits": unidentified_deposits,
             },
             "action_items": action_items,
+            "problem_measurement": problem_measurement,
         }
 
         # Render HTML

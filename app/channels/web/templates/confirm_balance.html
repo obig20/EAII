@@ -121,6 +121,18 @@
       </div>
     </div>
 
+    <!-- Remittance Notice -->
+    <div style="padding: 0.75rem 1rem; border-radius: var(--radius-md); background: #f8fafc; border: 1px solid var(--color-border-subtle); color: var(--color-text-main); font-size: 0.8125rem; display: flex; align-items: center; gap: 0.5rem;" data-testid="remittance-instruction-box">
+      <svg class="icon" viewBox="0 0 24 24" style="width: 16px; height: 16px; color: var(--color-primary); flex-shrink: 0;"><path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>
+      <div>
+        {% if lang == 'am' %}
+        <strong>የክፍያ ማስታወሻ፡</strong> እባክዎ በዝውውር ማስታወሻዎ ላይ የደረሰኝ ቁጥሩን ይፃፉ <!-- needs native review -->
+        {% else %}
+        <strong>Payment Note:</strong> Please write the invoice number in your transfer note.
+        {% endif %}
+      </div>
+    </div>
+
     <!-- Actions: Confirm vs Dispute -->
     <div style="display: grid; grid-template-columns: 1fr; gap: 1rem;">
       

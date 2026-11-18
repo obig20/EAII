@@ -112,5 +112,6 @@
   "payer_memory_title": "Payer Memory",
   "payer_memory_link_payer": "Link Payer",
   "payer_memory_known_payer": "Known payer, you confirmed on {date}",
-  "payer_memory_belongs_to": "This payer belongs to [retailer]"
+  "payer_memory_belongs_to": "This payer belongs to [retailer]",
+  "remittance_invoice_note": "Please write the invoice number in your transfer note"
 }
