@@ -51,6 +51,18 @@ class Settings(BaseSettings):
     # Telegram Webhook Secret
     telegram_webhook_secret: str = ""
 
+    # CORS: browser origins allowed to call the /api/v1 JSON API (the PWA).
+    # Explicit origins only — "*" is rejected because the API accepts credentials.
+    # Override with CORS_ALLOWED_ORIGINS='["https://app.example.com"]'.
+    cors_allowed_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+
+    @field_validator("cors_allowed_origins")
+    @classmethod
+    def cors_origins_explicit(cls, v: list[str]) -> list[str]:
+        if any(origin.strip() == "*" for origin in v):
+            raise ValueError("CORS_ALLOWED_ORIGINS must list explicit origins; '*' is not allowed with credentials.")
+        return [origin.strip().rstrip("/") for origin in v if origin.strip()]
+
     @field_validator("secret_key")
     @classmethod
     def secret_key_min_length(cls, v: str) -> str:
