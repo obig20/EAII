@@ -1,0 +1,1 @@
+{"routes":[{"path":"/","title":"Today"},{"path":"/add-sale","title":"Add sale"},{"path":"/overdue","title":"Overdue"},{"path":"/review","title":"Review queue"},{"path":"/shop/:token","title":"Shop balance"}]}
